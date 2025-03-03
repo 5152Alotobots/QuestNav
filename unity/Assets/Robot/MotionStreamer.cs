@@ -134,6 +134,17 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     private float batteryPercent = 0;
 
+    // Reconnection fields
+    private bool isReconnecting = false;
+    private float reconnectDelay = 0.25f; // Short fixed delay between attempts
+    private float reconnectTimer = 0f;
+    private int reconnectAttempts = 0;
+    private bool topicsPublished = false;
+
+    // Connection health monitoring
+    private float lastReceiveTime = 0f;
+    private const float DATA_TIMEOUT = 5.0f; // 5 seconds without receiving data = stale connection
+
     #region NetworkTables Configuration
     /// <summary>
     /// Application name for NetworkTables connection
@@ -185,6 +196,7 @@ public class MotionStreamer : MonoBehaviour
         ConnectToRobot();
         teamUpdateButton.onClick.AddListener(UpdateTeamNumber);
         teamInput.onSelect.AddListener(OnInputFieldSelected);
+        lastReceiveTime = Time.time; // Initialize last receive time
     }
 
     /// <summary>
@@ -192,8 +204,29 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     void LateUpdate()
     {
-        if (frcDataSink.Client.Connected())
+        // Check for stale connections and force reconnect if needed
+        if (frcDataSink != null && frcDataSink.Client != null && frcDataSink.Client.Connected())
         {
+            // Reset reconnection state if we're connected
+            if (isReconnecting)
+            {
+                isReconnecting = false;
+                Debug.Log("[MotionStreamer] Connection restored");
+            }
+            
+            // Force reconnection if we haven't received data in a while
+            if (Time.time - lastReceiveTime > DATA_TIMEOUT) {
+                Debug.Log("[MotionStreamer] Connection appears stale. Forcing reconnection...");
+                HandleDisconnectedState();
+                return;
+            }
+
+            // Ensure topics are properly published
+            if (!topicsPublished) {
+                PublishTopics();
+            }
+            
+            // Normal connected operation
             PublishFrameData();
 
             if (delayCounter >= 0)
@@ -208,6 +241,8 @@ public class MotionStreamer : MonoBehaviour
         }
         else
         {
+            // Handle reconnection if not connected
+            topicsPublished = false;
             HandleDisconnectedState();
         }
     }
@@ -219,41 +254,103 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     private void ConnectToRobot()
     {
-        if (useAddress == true)
+        string attemptedAddress = "Unknown";
+        
+        try
         {
-            ipAddress = getIP();
-            useAddress = false;
-        }
-        else
-        {
-            try
+            if (useAddress == true)
             {
-                IPHostEntry hostEntry = Dns.GetHostEntry(getDNS());
-                IPAddress[] ipv4Addresses = hostEntry.AddressList
-                   .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                   .ToArray();
-                ipAddress = ipv4Addresses[0].ToString();
+                ipAddress = getIP();
+                attemptedAddress = ipAddress;
+                useAddress = false;
             }
-            catch (Exception ex)
+            else
             {
-                Debug.Log($"Error resolving DNS name: {ex.Message}");
-            }
+                try
+                {
+                    string dnsName = getDNS();
+                    attemptedAddress = dnsName;
+                    IPHostEntry hostEntry = Dns.GetHostEntry(dnsName);
+                    IPAddress[] ipv4Addresses = hostEntry.AddressList
+                       .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                       .ToArray();
+                       
+                    if (ipv4Addresses.Length > 0)
+                    {
+                        ipAddress = ipv4Addresses[0].ToString();
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[MotionStreamer] No IPv4 addresses found for {dnsName}, falling back to IP-based connection");
+                        ipAddress = getIP();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[MotionStreamer] Error resolving DNS name: {ex.Message}, falling back to IP-based connection");
+                    ipAddress = getIP();
+                }
 
-            useAddress = true;
+                useAddress = true;
+            }
+            
+            Debug.Log($"[MotionStreamer] Attempting to connect to the RoboRIO at {ipAddress} (via {attemptedAddress}).");
+            frcDataSink = new Nt4Source(appName, ipAddress, serverPort);
+            PublishTopics();
         }
-        Debug.Log("[MotionStreamer] Attempting to connect to the RoboRIO at " + ipAddress + ".");
-        frcDataSink = new Nt4Source(appName, ipAddress, serverPort);
-        PublishTopics();
+        catch (Exception ex)
+        {
+            Debug.LogError($"[MotionStreamer] Failed to connect to {attemptedAddress}: {ex.Message}");
+        }
     }
 
     /// <summary>
-    /// Handles reconnection when connection is lost
+    /// Handles rapid reconnection strategy when connection is lost
     /// </summary>
     private void HandleDisconnectedState()
     {
-        Debug.Log("[MotionStreamer] Robot disconnected. Resetting connection and attempting to reconnect...");
-        frcDataSink.Client.Disconnect();
-        ConnectToRobot();
+        if (!isReconnecting)
+        {
+            Debug.Log("[MotionStreamer] Robot disconnected. Starting rapid reconnection process...");
+            isReconnecting = true;
+            reconnectTimer = 0f;
+            reconnectAttempts = 0;
+            
+            // More thorough cleanup of the old connection
+            if (frcDataSink != null && frcDataSink.Client != null)
+            {
+                try
+                {
+                    frcDataSink.Client.Disconnect();
+                    // Force garbage collection to clean up socket resources
+                    System.GC.Collect();
+                    System.GC.WaitForPendingFinalizers();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[MotionStreamer] Error during connection cleanup: {ex.Message}");
+                }
+                
+                // Set to null to ensure complete recreation
+                frcDataSink = null;
+            }
+        }
+        
+        // Handle reconnection with fixed short delay
+        reconnectTimer += Time.deltaTime;
+        if (reconnectTimer >= reconnectDelay)
+        {
+            reconnectAttempts++;
+            Debug.Log($"[MotionStreamer] Reconnection attempt {reconnectAttempts}");
+            
+            // Toggle between connection methods to increase chances of success
+            useAddress = !useAddress;
+            
+            // Create a fresh client instance
+            ConnectToRobot();
+            
+            reconnectTimer = 0f;
+        }
     }
 
     /// <summary>
@@ -261,17 +358,30 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     private void PublishTopics()
     {
-        frcDataSink.PublishTopic("/questnav/miso", "int");
-        frcDataSink.PublishTopic("/questnav/frameCount", "int");
-        frcDataSink.PublishTopic("/questnav/timestamp", "double");
-        frcDataSink.PublishTopic("/questnav/position", "float[]");
-        frcDataSink.PublishTopic("/questnav/quaternion", "float[]");
-        frcDataSink.PublishTopic("/questnav/eulerAngles", "float[]");
-        frcDataSink.PublishTopic("/questnav/batteryPercent", "double");
-        frcDataSink.Subscribe("/questnav/mosi", 0.1, false, false, false);
-        frcDataSink.Subscribe("/questnav/init/position", 0.1, false, false, false);
-        frcDataSink.Subscribe("/questnav/init/eulerAngles", 0.1, false, false, false);
-        frcDataSink.Subscribe("/questnav/resetpose", 0.1, false, false, false);
+        try
+        {
+            if (frcDataSink == null) return;
+            
+            frcDataSink.PublishTopic("/questnav/miso", "int");
+            frcDataSink.PublishTopic("/questnav/frameCount", "int");
+            frcDataSink.PublishTopic("/questnav/timestamp", "double");
+            frcDataSink.PublishTopic("/questnav/position", "float[]");
+            frcDataSink.PublishTopic("/questnav/quaternion", "float[]");
+            frcDataSink.PublishTopic("/questnav/eulerAngles", "float[]");
+            frcDataSink.PublishTopic("/questnav/batteryPercent", "double");
+            frcDataSink.Subscribe("/questnav/mosi", 0.1, false, false, false);
+            frcDataSink.Subscribe("/questnav/init/position", 0.1, false, false, false);
+            frcDataSink.Subscribe("/questnav/init/eulerAngles", 0.1, false, false, false);
+            frcDataSink.Subscribe("/questnav/resetpose", 0.1, false, false, false);
+            
+            topicsPublished = true;
+            Debug.Log("[MotionStreamer] Topics published successfully");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[MotionStreamer] Error publishing topics: {ex.Message}");
+            topicsPublished = false;
+        }
     }
     #endregion
 
@@ -281,19 +391,29 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     private void PublishFrameData()
     {
-        frameIndex = Time.frameCount;
-        timeStamp = Time.time;
-        position = cameraRig.centerEyeAnchor.position;
-        rotation = cameraRig.centerEyeAnchor.rotation;
-        eulerAngles = cameraRig.centerEyeAnchor.eulerAngles;
-        batteryPercent = SystemInfo.batteryLevel * 100;
+        try 
+        {
+            // Get current values from camera rig
+            frameIndex = Time.frameCount;
+            timeStamp = Time.time;
+            position = cameraRig.centerEyeAnchor.position;
+            rotation = cameraRig.centerEyeAnchor.rotation;
+            eulerAngles = cameraRig.centerEyeAnchor.eulerAngles;
+            batteryPercent = SystemInfo.batteryLevel * 100;
 
-        frcDataSink.PublishValue("/questnav/frameCount", frameIndex);
-        frcDataSink.PublishValue("/questnav/timestamp", timeStamp);
-        frcDataSink.PublishValue("/questnav/position", position.ToArray());
-        frcDataSink.PublishValue("/questnav/quaternion", rotation.ToArray());
-        frcDataSink.PublishValue("/questnav/eulerAngles", eulerAngles.ToArray());
-        frcDataSink.PublishValue("/questnav/batteryPercent", batteryPercent);
+            // Publish values to NetworkTables
+            frcDataSink.PublishValue("/questnav/frameCount", frameIndex);
+            frcDataSink.PublishValue("/questnav/timestamp", timeStamp);
+            frcDataSink.PublishValue("/questnav/position", position.ToArray());
+            frcDataSink.PublishValue("/questnav/quaternion", rotation.ToArray());
+            frcDataSink.PublishValue("/questnav/eulerAngles", eulerAngles.ToArray());
+            frcDataSink.PublishValue("/questnav/batteryPercent", batteryPercent);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[MotionStreamer] Error publishing frame data: {ex.Message}");
+            HandleDisconnectedState();
+        }
     }
     #endregion
 
@@ -303,44 +423,52 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     private void ProcessCommands()
     {
-        command = frcDataSink.GetLong("/questnav/mosi");
-
-        if (resetInProgress && command == 0)
+        try
         {
-            resetInProgress = false;
-            Debug.Log("[MotionStreamer] Reset operation completed");
-            return;
+            command = frcDataSink.GetLong("/questnav/mosi");
+            lastReceiveTime = Time.time; // Update time when we successfully get data
+
+            if (resetInProgress && command == 0)
+            {
+                resetInProgress = false;
+                Debug.Log("[MotionStreamer] Reset operation completed");
+                return;
+            }
+
+            switch (command)
+            {
+                case 1:
+                    if (!resetInProgress)
+                    {
+                        Debug.Log("[MotionStreamer] Received heading reset request, initiating recenter...");
+                        RecenterPlayer();
+                        resetInProgress = true;
+                    }
+                    break;
+                case 2:
+                    if (!resetInProgress)
+                    {
+                        Debug.Log("[MotionStreamer] Received pose reset request, initiating reset...");
+                        InitiatePoseReset();
+                        Debug.Log("[MotionStreamer] Processing pose reset request.");
+                        resetInProgress = true;
+                    }
+                    break;
+                case 3:
+                    Debug.Log("[MotionStreamer] Ping received, responding...");
+                    frcDataSink.PublishValue("/questnav/miso", 97);  // 97 for ping response
+                    break;
+                default:
+                    if (!resetInProgress)
+                    {
+                        frcDataSink.PublishValue("/questnav/miso", 0);
+                    }
+                    break;
+            }
         }
-
-        switch (command)
+        catch (Exception ex)
         {
-            case 1:
-                if (!resetInProgress)
-                {
-                    Debug.Log("[MotionStreamer] Received heading reset request, initiating recenter...");
-                    RecenterPlayer();
-                    resetInProgress = true;
-                }
-                break;
-            case 2:
-                if (!resetInProgress)
-                {
-                    Debug.Log("[MotionStreamer] Received pose reset request, initiating reset...");
-                    InitiatePoseReset();
-                    Debug.Log("[MotionStreamer] Processing pose reset request.");
-                    resetInProgress = true;
-                }
-                break;
-            case 3:
-                Debug.Log("[MotionStreamer] Ping received, responding...");
-                frcDataSink.PublishValue("/questnav/miso", 97);  // 97 for ping response
-                break;
-            default:
-                if (!resetInProgress)
-                {
-                    frcDataSink.PublishValue("/questnav/miso", 0);
-                }
-                break;
+            Debug.LogError($"[MotionStreamer] Error processing commands: {ex.Message}");
         }
     }
 
@@ -394,6 +522,8 @@ public class MotionStreamer : MonoBehaviour
             // Exit if we couldn't get valid pose data
             if (!success) {
                 Debug.LogWarning($"[MotionStreamer] Failed to read valid reset pose values after {attemptCount} attempts");
+                frcDataSink.PublishValue("/questnav/miso", 0);
+                resetInProgress = false;
                 return;
             }
 
@@ -485,17 +615,21 @@ public class MotionStreamer : MonoBehaviour
     void RecenterPlayer()
     {
         try {
+            // Calculate the rotation angle difference between current camera and reset position
             float rotationAngleY = vrCamera.rotation.eulerAngles.y - resetTransform.rotation.eulerAngles.y;
 
+            // Apply negative rotation to camera root to align with reset orientation
             vrCameraRoot.transform.Rotate(0, -rotationAngleY, 0);
 
+            // Calculate position difference and apply to camera root
             Vector3 distanceDiff = resetTransform.position - vrCamera.position;
             vrCameraRoot.transform.position += distanceDiff;
 
+            // Send success response to robot
             frcDataSink.PublishValue("/questnav/miso", 99);
         }
         catch (Exception e) {
-            Debug.LogError($"[MotionStreamer] Error during pose reset: {e.Message}");
+            Debug.LogError($"[MotionStreamer] Error during player recenter: {e.Message}");
             Debug.LogException(e);
             frcDataSink.PublishValue("/questnav/miso", 0);
             resetInProgress = false;
