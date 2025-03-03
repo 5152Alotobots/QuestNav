@@ -7,15 +7,15 @@ namespace NetworkTables
 {
     public class Nt4Source
     {
-        public readonly Nt4Client Client;
+        public Nt4Client Client { get; private set; }
 
-        private readonly Dictionary<string, TopicValue<string>> _stringValues = new();
-        private readonly Dictionary<string, TopicValue<long>> _longValues = new();
-        private readonly Dictionary<string, TopicValue<double>> _doubleValues = new();
-        private readonly Dictionary<string, TopicValue<double[]>> _doubleArrayValues = new();
+        private Dictionary<string, TopicValue<string>> _stringValues = new Dictionary<string, TopicValue<string>>();
+        private Dictionary<string, TopicValue<long>> _longValues = new Dictionary<string, TopicValue<long>>();
+        private Dictionary<string, TopicValue<double>> _doubleValues = new Dictionary<string, TopicValue<double>>();
+        private Dictionary<string, TopicValue<double[]>> _doubleArrayValues = new Dictionary<string, TopicValue<double[]>>();
 
-        private readonly Dictionary<string, string> _queuedPublishes = new();
-        private readonly Dictionary<string, Nt4SubscriptionOptions> _queuedSubscribes = new();
+        private Dictionary<string, string> _queuedPublishes = new Dictionary<string, string>();
+        private Dictionary<string, Nt4SubscriptionOptions> _queuedSubscribes = new Dictionary<string, Nt4SubscriptionOptions>();
 
         // Whether we've successfully connected and processed all queued operations
         private bool _initialConnectionEstablished = false;
@@ -34,6 +34,106 @@ namespace NetworkTables
                 {
                     Debug.LogError($"[NT4Source] Initial connection failed: {result.errorMessage}");
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4Source] Error creating NT4Source: {ex.Message}");
+                throw; // Re-throw to allow caller to handle
+            }
+        }
+        
+        public void PublishTopic(string topic, string type)
+        {
+            try
+            {
+                // Always queue publishes to handle reconnection scenarios
+                if (!_queuedPublishes.ContainsKey(topic))
+                {
+                    _queuedPublishes.Add(topic, type);
+                }
+                else
+                {
+                    _queuedPublishes[topic] = type;
+                }
+                
+                // If connected, publish immediately
+                if (Client != null && Client.Connected())
+                {
+                    Client.PublishTopic(topic, type);
+                    Debug.Log($"[NT4Source] Published topic: {topic} of type: {type}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4Source] Error publishing topic {topic}: {ex.Message}");
+            }
+        }
+        
+        public void PublishValue(string topic, object value)
+        {
+            try
+            {
+                if (Client != null && Client.Connected())
+                {
+                    Client.PublishValue(topic, value);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4Source] Error publishing value for topic {topic}: {ex.Message}");
+            }
+        }
+        
+        public void Subscribe(string topic, double period = 0.1, bool all = false, bool topicsOnly = false, bool prefix = false)
+        {
+            try
+            {
+                // Always queue subscribes to handle reconnection scenarios
+                if (!_queuedSubscribes.ContainsKey(topic))
+                {
+                    _queuedSubscribes.Add(topic, new Nt4SubscriptionOptions(period, all, topicsOnly, prefix));
+                }
+                else
+                {
+                    _queuedSubscribes[topic] = new Nt4SubscriptionOptions(period, all, topicsOnly, prefix);
+                }
+                
+                // If connected, subscribe immediately
+                if (Client != null && Client.Connected())
+                {
+                    Client.Subscribe(topic, period, all, topicsOnly, prefix);
+                    Debug.Log($"[NT4Source] Subscribed to topic: {topic}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4Source] Error subscribing to topic {topic}: {ex.Message}");
+            }
+        }
+
+        private void OnOpen(object sender, EventArgs e)
+        {
+            try
+            {
+                Debug.Log("[NT4Source] Connection opened, processing queued operations...");
+                
+                // Process all queued publishes
+                foreach(string topic in _queuedPublishes.Keys)
+                {
+                    Debug.Log($"[NT4Source] Publishing queued topic: {topic}");
+                    Client.PublishTopic(topic, _queuedPublishes[topic]);
+                }
+                
+                // Process all queued subscribes
+                foreach(string topic in _queuedSubscribes.Keys)
+                {
+                    Debug.Log($"[NT4Source] Subscribing to queued topic: {topic}");
+                    Client.Subscribe(topic, _queuedSubscribes[topic]);
+                }
+                
+                _initialConnectionEstablished = true;
+                Debug.Log("[NT4Source] Finished processing queued operations");
+            }
             catch (Exception ex)
             {
                 Debug.LogError($"[NT4Source] Error in OnOpen handler: {ex.Message}");
@@ -75,9 +175,9 @@ namespace NetworkTables
         {
             try
             {
-                if (_stringValues.TryGetValue(key, out var value))
+                if (_stringValues.ContainsKey(key))
                 {
-                    return value.GetValue();
+                    return _stringValues[key].GetValue();
                 }
             }
             catch (Exception ex)
@@ -97,9 +197,9 @@ namespace NetworkTables
         {
             try
             {
-                if (_longValues.TryGetValue(key, out var value))
+                if (_longValues.ContainsKey(key))
                 {
-                    return value.GetValue();
+                    return _longValues[key].GetValue();
                 }
             }
             catch (Exception ex)
@@ -119,9 +219,9 @@ namespace NetworkTables
         {
             try
             {
-                if (_doubleValues.TryGetValue(key, out var value))
+                if (_doubleValues.ContainsKey(key))
                 {
-                    return value.GetValue();
+                    return _doubleValues[key].GetValue();
                 }
             }
             catch (Exception ex)
@@ -141,9 +241,9 @@ namespace NetworkTables
         {
             try
             {
-                if (_doubleArrayValues.TryGetValue(key, out var value))
+                if (_doubleArrayValues.ContainsKey(key))
                 {
-                    return value.GetValue();
+                    return _doubleArrayValues[key].GetValue();
                 }
             }
             catch (Exception ex)
@@ -158,7 +258,10 @@ namespace NetworkTables
         {
             try
             {
-                _stringValues.TryAdd(key, new TopicValue<string>());
+                if (!_stringValues.ContainsKey(key))
+                {
+                    _stringValues.Add(key, new TopicValue<string>());
+                }
                 _stringValues[key].AddValue(timestamp, Convert.ToString(value));
             }
             catch (Exception ex)
@@ -171,7 +274,10 @@ namespace NetworkTables
         {
             try
             {
-                _longValues.TryAdd(key, new TopicValue<long>());
+                if (!_longValues.ContainsKey(key))
+                {
+                    _longValues.Add(key, new TopicValue<long>());
+                }
                 _longValues[key].AddValue(timestamp, Convert.ToInt64(value));
             }
             catch (Exception ex)
@@ -184,7 +290,10 @@ namespace NetworkTables
         {
             try
             {
-                _doubleValues.TryAdd(key, new TopicValue<double>());
+                if (!_doubleValues.ContainsKey(key))
+                {
+                    _doubleValues.Add(key, new TopicValue<double>());
+                }
                 _doubleValues[key].AddValue(timestamp, Convert.ToDouble(value));
             }
             catch (Exception ex)
@@ -197,7 +306,11 @@ namespace NetworkTables
         {
             try
             {
-                _doubleArrayValues.TryAdd(key, new TopicValue<double[]>());
+                if (!_doubleArrayValues.ContainsKey(key))
+                {
+                    _doubleArrayValues.Add(key, new TopicValue<double[]>());
+                }
+                
                 if (value is object[] arr)
                 {
                     _doubleArrayValues[key].AddValue(timestamp, arr.Cast<double>().ToArray());
@@ -209,89 +322,4 @@ namespace NetworkTables
             }
         }
     }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[NT4Source] Error creating NT4Source: {ex.Message}");
-                throw; // Re-throw to allow caller to handle
-            }
-        }
-        
-        public void PublishTopic(string topic, string type)
-        {
-            try
-            {
-                // Always queue publishes to handle reconnection scenarios
-                _queuedPublishes[topic] = type;
-                
-                // If connected, publish immediately
-                if (Client.Connected())
-                {
-                    Client.PublishTopic(topic, type);
-                    Debug.Log($"[NT4Source] Published topic: {topic} of type: {type}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[NT4Source] Error publishing topic {topic}: {ex.Message}");
-            }
-        }
-        
-        public void PublishValue(string topic, object value)
-        {
-            try
-            {
-                if (Client != null && Client.Connected())
-                {
-                    Client.PublishValue(topic, value);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[NT4Source] Error publishing value for topic {topic}: {ex.Message}");
-            }
-        }
-        
-        public void Subscribe(string topic, double period = 0.1, bool all = false, bool topicsOnly = false, bool prefix = false)
-        {
-            try
-            {
-                // Always queue subscribes to handle reconnection scenarios
-                _queuedSubscribes[topic] = new Nt4SubscriptionOptions(period, all, topicsOnly, prefix);
-                
-                // If connected, subscribe immediately
-                if (Client != null && Client.Connected())
-                {
-                    Client.Subscribe(topic, period, all, topicsOnly, prefix);
-                    Debug.Log($"[NT4Source] Subscribed to topic: {topic}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[NT4Source] Error subscribing to topic {topic}: {ex.Message}");
-            }
-        }
-
-        private void OnOpen(object sender, EventArgs e)
-        {
-            try
-            {
-                Debug.Log("[NT4Source] Connection opened, processing queued operations...");
-                
-                // Process all queued publishes
-                foreach(string topic in _queuedPublishes.Keys)
-                {
-                    Debug.Log($"[NT4Source] Publishing queued topic: {topic}");
-                    Client.PublishTopic(topic, _queuedPublishes[topic]);
-                }
-                
-                // Process all queued subscribes
-                foreach(string topic in _queuedSubscribes.Keys)
-                {
-                    Debug.Log($"[NT4Source] Subscribing to queued topic: {topic}");
-                    Client.Subscribe(topic, _queuedSubscribes[topic]);
-                }
-                
-                _initialConnectionEstablished = true;
-                Debug.Log("[NT4Source] Finished processing queued operations");
-            }
+}
