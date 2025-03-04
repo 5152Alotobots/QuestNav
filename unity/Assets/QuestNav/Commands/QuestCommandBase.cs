@@ -1,9 +1,8 @@
-﻿using QuestNav.Commands;
-using UnityEngine;
-using QuestNav.Network.NetworkTables_CSharp;
+﻿using QuestNav.Network.NetworkTables_CSharp;
 using QuestNav.Transformation;
+using UnityEngine;
 
-namespace QuestNavigation.Commands
+namespace QuestNav.Commands
 {
     /// <summary>
     /// Base class for all Quest commands with common functionality
