@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
-namespace NetworkTables
+namespace QuestNav.Network.NetworkTables_CSharp
 {
     public class Nt4Source
     {
