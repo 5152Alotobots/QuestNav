@@ -21,6 +21,10 @@
         // Server address formats
         public const string SERVER_ADDRESS_FORMAT = "10.TE.AM.2";
         public const string SERVER_DNS_FORMAT = "roboRIO-####-FRC.local";
+        public const string SIM_SERVER_ADDRESS = "10.0.0.113";  // Simulation server address (localhost)
+    
+        // Simulation mode flag
+        public const bool USE_SIMULATION_MODE = true;  // Set to true to enable simulation mode
     
         // Command codes (Robot → Quest)
         public const int CMD_NONE = 0;

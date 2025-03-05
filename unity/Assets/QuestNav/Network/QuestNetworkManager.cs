@@ -63,6 +63,12 @@ namespace QuestNav.Network
         {
             this.teamNumber = teamNumber;
             lastReceiveTime = Time.time;
+            
+            if (QuestNavConstants.USE_SIMULATION_MODE)
+            {
+                Debug.Log("[QuestNetworkManager] Initializing in simulation mode using localhost");
+            }
+            
             ConnectToRobot();
         }
     
@@ -134,7 +140,13 @@ namespace QuestNav.Network
         
             try
             {
-                if (useAddress)
+                // In simulation mode, always use localhost
+                if (QuestNavConstants.USE_SIMULATION_MODE)
+                {
+                    ipAddress = QuestNavConstants.SIM_SERVER_ADDRESS;
+                    attemptedAddress = ipAddress;
+                }
+                else if (useAddress)
                 {
                     ipAddress = GetIP();
                     attemptedAddress = ipAddress;
@@ -170,7 +182,8 @@ namespace QuestNav.Network
                     useAddress = true;
                 }
             
-                Debug.Log($"[QuestNetworkManager] Attempting to connect to the RoboRIO at {ipAddress} (via {attemptedAddress}).");
+                string connectionTarget = QuestNavConstants.USE_SIMULATION_MODE ? "simulation" : "RoboRIO";
+                Debug.Log($"[QuestNetworkManager] Attempting to connect to the {connectionTarget} at {ipAddress} (via {attemptedAddress}).");
                 frcDataSink = new Nt4Source(QuestNavConstants.APP_NAME, ipAddress, QuestNavConstants.SERVER_PORT);
                 PublishTopics();
             }
@@ -220,7 +233,11 @@ namespace QuestNav.Network
                 Debug.Log($"[QuestNetworkManager] Reconnection attempt {reconnectAttempts}");
             
                 // Toggle between connection methods to increase chances of success
-                useAddress = !useAddress;
+                // But only if not in simulation mode
+                if (!QuestNavConstants.USE_SIMULATION_MODE)
+                {
+                    useAddress = !useAddress;
+                }
             
                 // Create a fresh client instance
                 ConnectToRobot();
@@ -279,6 +296,13 @@ namespace QuestNav.Network
         /// <returns>The formatted IP address string</returns>
         private string GetIP()
         {
+            // For simulation mode, return localhost
+            if (QuestNavConstants.USE_SIMULATION_MODE)
+            {
+                return QuestNavConstants.SIM_SERVER_ADDRESS;
+            }
+            
+            // Otherwise, format the IP based on team number
             string tePart = teamNumber.Length > 2 ? teamNumber.Substring(0, teamNumber.Length - 2) : "0";
             string amPart = teamNumber.Length > 2 ? teamNumber.Substring(teamNumber.Length - 2) : teamNumber;
             return QuestNavConstants.SERVER_ADDRESS_FORMAT.Replace("TE", tePart).Replace("AM", amPart);
