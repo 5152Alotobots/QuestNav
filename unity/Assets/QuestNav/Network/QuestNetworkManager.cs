@@ -19,18 +19,16 @@ namespace QuestNav.Network
         private float reconnectTimer = 0f;
         private int reconnectAttempts = 0;
         private bool topicsPublished = false;
-        private float lastReceiveTime = 0f;
     
         // Team number management
         private string teamNumber;
         private bool useAddress = true;
         private string ipAddress = "";
         
-        // Heartbeat tracking
+        // Heartbeat tracking - now only tracked on main thread
         private float heartbeatTimer = 0f;
         private double lastHeartbeatRequestId = 0;
         private double lastReceivedResponseId = 0;
-        private float lastResponseTime = 0f;
         
         /// <summary>
         /// Connection status enum defining possible connection states
@@ -94,8 +92,6 @@ namespace QuestNav.Network
         public QuestNetworkManager(string teamNumber)
         {
             this.teamNumber = teamNumber;
-            lastReceiveTime = Time.time;
-            lastResponseTime = Time.time;
             
             if (QuestNavConstants.USE_SIMULATION_MODE)
             {
@@ -190,7 +186,6 @@ namespace QuestNav.Network
                 {
                     // Got a valid response
                     lastReceivedResponseId = responseId;
-                    lastResponseTime = Time.time;
                     
                     // If we were in a degraded state but now getting responses, restore connected status
                     if (currentStatus != ConnectionStatus.Connected)
@@ -200,18 +195,19 @@ namespace QuestNav.Network
                     }
                 }
                 
-                // Check for heartbeat response timeouts
-                float timeSinceLastResponse = Time.time - lastResponseTime;
-                
-                // No recent response - connection degraded
-                if (currentStatus == ConnectionStatus.Connected && 
-                    timeSinceLastResponse > QuestNavConstants.HEARTBEAT_RESPONSE_TIMEOUT)
+                // If we haven't received any responses yet, but we haven't been trying for long
+                // consider the connection in a connecting state
+                if (lastReceivedResponseId == 0 && lastHeartbeatRequestId < 5)
                 {
-                    Debug.Log("[QuestNetworkManager] Heartbeat response delayed. Connection degraded.");
+                    UpdateConnectionStatus(ConnectionStatus.Connecting);
+                }
+                // If we've sent several heartbeats but received no responses, consider the connection degraded
+                else if (lastReceivedResponseId == 0 && lastHeartbeatRequestId >= 5 && lastHeartbeatRequestId < 15)
+                {
                     UpdateConnectionStatus(ConnectionStatus.Degraded);
                 }
-                // No responses for too long - disconnected
-                else if (timeSinceLastResponse > QuestNavConstants.HEARTBEAT_DISCONNECT_TIMEOUT)
+                // If we've sent many heartbeats but received no responses, consider the connection lost
+                else if (lastReceivedResponseId == 0 && lastHeartbeatRequestId >= 15)
                 {
                     Debug.Log("[QuestNetworkManager] Heartbeat responses missing for too long. Forcing reconnection...");
                     HandleDisconnectedState();
@@ -219,16 +215,16 @@ namespace QuestNav.Network
                 }
             }
             
-            // Connection is active if we've received at least one response (when heartbeat is required)
-            return lastReceivedResponseId > 0 && (Time.time - lastResponseTime) < QuestNavConstants.HEARTBEAT_DISCONNECT_TIMEOUT;
+            // Connection is active if WebSocket is open and connected
+            return ntConnected;
         }
     
         /// <summary>
-        /// Updates the last receive time, should be called whenever data is received
+        /// Updates the last receive time, called whenever data is received
         /// </summary>
         public void UpdateReceiveTime()
         {
-            lastReceiveTime = Time.time;
+            // No longer using time-based monitoring, this is a no-op now
         }
     
         /// <summary>

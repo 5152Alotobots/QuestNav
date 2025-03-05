@@ -39,9 +39,8 @@ namespace QuestNav.Network.NetworkTables_CSharp
         private long? _serverTimeOffsetUs;
         private long _networkLatencyUs;
 
-        // Track the last successful communication time for connection health monitoring
-        private float _lastSuccessfulCommunication = 0f;
-        private const float COMMUNICATION_TIMEOUT = 3.0f; // 3 seconds without comms = connection issue
+        // Track connection state without using Time.time
+        private bool _connectionActive = false;
 
         private readonly Dictionary<int, Nt4Subscription> _subscriptions = new Dictionary<int, Nt4Subscription>();
         private readonly Dictionary<string, Nt4Topic> _publishedTopics = new Dictionary<string, Nt4Topic>();
@@ -64,7 +63,7 @@ namespace QuestNav.Network.NetworkTables_CSharp
             _appName = appName;
             _onNewTopicData = onNewTopicData;
             _onOpen = onOpen;
-            _lastSuccessfulCommunication = Time.time; // Initialize with current time
+            _connectionActive = false;
         }
 
         /// <summary>
@@ -132,13 +131,14 @@ namespace QuestNav.Network.NetworkTables_CSharp
                     Debug.LogWarning($"[NT4] Error during disconnect: {ex.Message}");
                 }
             }
+            _connectionActive = false;
         }
         
         // Event handlers
         private void OnOpen(object sender, EventArgs e)
         {
             Debug.Log("[NT4] Connected with identity " + _appName);
-            _lastSuccessfulCommunication = Time.time; // Update communication time
+            _connectionActive = true;
             WsSendTimestamp();
             
             // Call the user-provided event handler
@@ -147,8 +147,8 @@ namespace QuestNav.Network.NetworkTables_CSharp
 
         private void OnMessage(object message, MessageEventArgs args)
         {
-            // Update communication timestamp whenever we receive a message
-            _lastSuccessfulCommunication = Time.time;
+            // Update connection status whenever we receive a message
+            _connectionActive = true;
 
             if (args.Data != null)
             {
@@ -203,11 +203,13 @@ namespace QuestNav.Network.NetworkTables_CSharp
         private void OnError(object sender, ErrorEventArgs e)
         {
             Debug.LogError("[NT4] Error: " + e.Message + " " + e.Exception);
+            _connectionActive = false;
         }
         
         private void OnClose(object sender, CloseEventArgs e)
         {
             Debug.Log("[NT4] Disconnected: " + e.Reason);
+            _connectionActive = false;
         }
         
         /// <summary>
@@ -559,18 +561,12 @@ namespace QuestNav.Network.NetworkTables_CSharp
         }
 
         /// <summary>
-        /// Checks if the client is connected and has had recent communication
+        /// Checks if the client is connected
         /// </summary>
-        /// <returns>True if connected and healthy, False otherwise</returns>
+        /// <returns>True if connected, False otherwise</returns>
         public bool Connected()
         {
-            // Check if WebSocket is connected
-            bool wsConnected = _ws != null && _ws.ReadyState == WebSocketState.Open;
-            
-            // Check if we've received any communication recently
-            bool commActive = (Time.time - _lastSuccessfulCommunication) < COMMUNICATION_TIMEOUT;
-            
-            return wsConnected && commActive;
+            return _ws != null && _ws.ReadyState == WebSocketState.Open && _connectionActive;
         }
     }
 }

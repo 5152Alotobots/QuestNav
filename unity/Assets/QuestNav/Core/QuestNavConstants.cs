@@ -15,7 +15,7 @@
         public const int SERVER_PORT = 5810;        // NetworkTables server port
         
         // Heartbeat constants
-        public const bool REQUIRE_HEARTBEAT = false;  // Set to false to disable heartbeat checks
+        public const bool REQUIRE_HEARTBEAT = true;  // Set to false to disable heartbeat checks
         public const float HEARTBEAT_REQUEST_INTERVAL = 0.2f;  // 200ms between heartbeat requests
         public const float HEARTBEAT_RESPONSE_TIMEOUT = 1.0f;  // 1 second to respond = degraded
         public const float HEARTBEAT_DISCONNECT_TIMEOUT = 3.0f; // 3 seconds without response = disconnected
