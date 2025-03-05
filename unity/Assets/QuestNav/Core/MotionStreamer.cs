@@ -79,7 +79,7 @@ namespace QuestNav.Core
         /// </summary>
         void LateUpdate()
         {
-            // Check network connection state
+            // Check network connection state using heartbeat system
             if (networkManager.UpdateConnectionState())
             {
                 // Connected, publish telemetry data
@@ -95,6 +95,41 @@ namespace QuestNav.Core
                 {
                     delayCounter++;
                 }
+                
+                // Update UI based on connection status
+                UpdateConnectionUI(networkManager.Status);
+            }
+            else
+            {
+                // Not connected, update UI to show disconnected state
+                UpdateConnectionUI(QuestNetworkManager.ConnectionStatus.Disconnected);
+            }
+        }
+        
+        /// <summary>
+        /// Updates the UI based on connection status
+        /// </summary>
+        private void UpdateConnectionUI(QuestNetworkManager.ConnectionStatus status)
+        {
+            // This is where you would update any UI elements to show connection status
+            // For example, change a status indicator color or text
+            switch (status)
+            {
+                case QuestNetworkManager.ConnectionStatus.Connected:
+                    // Green indicator, fully connected
+                    break;
+                    
+                case QuestNetworkManager.ConnectionStatus.Degraded:
+                    // Yellow indicator, connection issues
+                    break;
+                    
+                case QuestNetworkManager.ConnectionStatus.Connecting:
+                    // Blue indicator, trying to establish connection
+                    break;
+                    
+                case QuestNetworkManager.ConnectionStatus.Disconnected:
+                    // Red indicator, no connection
+                    break;
             }
         }
         

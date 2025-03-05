@@ -25,11 +25,41 @@ namespace QuestNav.Network
         private string teamNumber;
         private bool useAddress = true;
         private string ipAddress = "";
-    
+        
+        // Heartbeat tracking
+        private float heartbeatTimer = 0f;
+        private double lastRobotHeartbeat = 0;
+        private double questHeartbeatCounter = 0;
+        private bool robotHeartbeatDetected = false;
+        
+        /// <summary>
+        /// Connection status enum defining possible connection states
+        /// </summary>
+        public enum ConnectionStatus
+        {
+            Disconnected = 0,
+            Connecting = 1,
+            Connected = 2,
+            Degraded = 3
+        }
+        
+        private ConnectionStatus currentStatus = ConnectionStatus.Disconnected;
+        
+        /// <summary>
+        /// Get current connection status
+        /// </summary>
+        public ConnectionStatus Status => currentStatus;
+        
         /// <summary>
         /// Reference to the NetworkTables connection
         /// </summary>
         public Nt4Source NetworkTables => frcDataSink;
+        
+        /// <summary>
+        /// Whether the connection is considered active
+        /// </summary>
+        public bool IsConnected => currentStatus == ConnectionStatus.Connected || 
+                                  currentStatus == ConnectionStatus.Degraded;
     
         /// <summary>
         /// Disconnects from the robot and cleans up resources
@@ -48,6 +78,8 @@ namespace QuestNav.Network
                     Debug.LogWarning($"[QuestNetworkManager] Error disconnecting: {ex.Message}");
                 }
             }
+            
+            UpdateConnectionStatus(ConnectionStatus.Disconnected);
         }
     
         /// <summary>
@@ -82,6 +114,25 @@ namespace QuestNav.Network
             teamNumber = newTeamNumber;
             HandleDisconnectedState();
         }
+        
+        /// <summary>
+        /// Updates the connection status and publishes it to NetworkTables
+        /// </summary>
+        /// <param name="newStatus">New connection status</param>
+        private void UpdateConnectionStatus(ConnectionStatus newStatus)
+        {
+            if (newStatus != currentStatus)
+            {
+                Debug.Log($"[QuestNetworkManager] Connection status changed: {currentStatus} → {newStatus}");
+                currentStatus = newStatus;
+                
+                // Publish status if we have a connection
+                if (frcDataSink != null && frcDataSink.Client != null && frcDataSink.Client.Connected())
+                {
+                    frcDataSink.PublishValue(QuestNavConstants.Topics.CONNECTION_STATUS, (int)currentStatus);
+                }
+            }
+        }
     
         /// <summary>
         /// Updates the connection state, should be called from Update or LateUpdate
@@ -89,38 +140,85 @@ namespace QuestNav.Network
         /// <returns>Whether the connection is active</returns>
         public bool UpdateConnectionState()
         {
-            if (frcDataSink != null && frcDataSink.Client != null && frcDataSink.Client.Connected())
-            {
-                // Reset reconnection state if we're connected
-                if (isReconnecting)
-                {
-                    isReconnecting = false;
-                    Debug.Log("[QuestNetworkManager] Connection restored");
-                }
+            // Update heartbeat timer
+            heartbeatTimer += Time.deltaTime;
             
-                // Force reconnection if we haven't received data in a while
-                if (Time.time - lastReceiveTime > QuestNavConstants.DATA_TIMEOUT)
-                {
-                    Debug.Log("[QuestNetworkManager] Connection appears stale. Forcing reconnection...");
-                    HandleDisconnectedState();
-                    return false;
-                }
+            // Check if we have NT connection
+            bool ntConnected = frcDataSink != null && frcDataSink.Client != null && frcDataSink.Client.Connected();
             
-                // Ensure topics are properly published if needed
-                if (!topicsPublished)
-                {
-                    PublishTopics();
-                }
-            
-                return true;
-            }
-            else
+            if (!ntConnected)
             {
                 // Handle reconnection if not connected
                 topicsPublished = false;
+                UpdateConnectionStatus(ConnectionStatus.Disconnected);
                 HandleDisconnectedState();
                 return false;
             }
+            
+            // Ensure topics are properly published if needed
+            if (!topicsPublished)
+            {
+                PublishTopics();
+                UpdateConnectionStatus(ConnectionStatus.Connecting);
+            }
+            
+            // Time to send our own heartbeat?
+            if (heartbeatTimer >= QuestNavConstants.HEARTBEAT_INTERVAL)
+            {
+                // Send our heartbeat
+                questHeartbeatCounter++;
+                frcDataSink.PublishValue(QuestNavConstants.Topics.QUEST_HEARTBEAT, questHeartbeatCounter);
+                
+                // Check robot heartbeat
+                double currentRobotHeartbeat = frcDataSink.GetDouble(QuestNavConstants.Topics.ROBOT_HEARTBEAT);
+                
+                // First heartbeat detection (reconnection)
+                if (!robotHeartbeatDetected && currentRobotHeartbeat > 0)
+                {
+                    robotHeartbeatDetected = true;
+                    lastRobotHeartbeat = currentRobotHeartbeat;
+                    Debug.Log("[QuestNetworkManager] Robot heartbeat detected");
+                    UpdateConnectionStatus(ConnectionStatus.Connected);
+                    lastReceiveTime = Time.time;
+                }
+                // Heartbeat changed, connection is alive
+                else if (robotHeartbeatDetected && currentRobotHeartbeat != lastRobotHeartbeat)
+                {
+                    lastRobotHeartbeat = currentRobotHeartbeat;
+                    lastReceiveTime = Time.time;
+                    
+                    // If we were in a degraded state but heartbeat is now good, restore connected status
+                    if (currentStatus == ConnectionStatus.Degraded)
+                    {
+                        Debug.Log("[QuestNetworkManager] Connection quality improved");
+                        UpdateConnectionStatus(ConnectionStatus.Connected);
+                    }
+                }
+                // Heartbeat not changing, possible connection issue
+                else if (robotHeartbeatDetected && Time.time - lastReceiveTime > QuestNavConstants.HEARTBEAT_TIMEOUT)
+                {
+                    // If we're currently connected, first go to degraded state
+                    if (currentStatus == ConnectionStatus.Connected)
+                    {
+                        Debug.Log("[QuestNetworkManager] Heartbeat stalled. Connection degraded.");
+                        UpdateConnectionStatus(ConnectionStatus.Degraded);
+                    }
+                    // If already in degraded state for too long, force reconnection
+                    else if (currentStatus == ConnectionStatus.Degraded && 
+                             Time.time - lastReceiveTime > QuestNavConstants.DATA_TIMEOUT)
+                    {
+                        Debug.Log("[QuestNetworkManager] Heartbeat missing for too long. Forcing reconnection...");
+                        robotHeartbeatDetected = false;
+                        HandleDisconnectedState();
+                        return false;
+                    }
+                }
+                
+                heartbeatTimer = 0f;
+            }
+            
+            // Connection is considered active if we've seen at least one heartbeat
+            return robotHeartbeatDetected;
         }
     
         /// <summary>
@@ -185,6 +283,15 @@ namespace QuestNav.Network
                 string connectionTarget = QuestNavConstants.USE_SIMULATION_MODE ? "simulation" : "RoboRIO";
                 Debug.Log($"[QuestNetworkManager] Attempting to connect to the {connectionTarget} at {ipAddress} (via {attemptedAddress}).");
                 frcDataSink = new Nt4Source(QuestNavConstants.APP_NAME, ipAddress, QuestNavConstants.SERVER_PORT);
+                
+                // We'll rely on our heartbeat-based detection since direct connection events 
+                // aren't available in this NetworkTables client implementation
+                if (frcDataSink != null && frcDataSink.Client != null)
+                {
+                    Debug.Log("[QuestNetworkManager] NetworkTables client initialized, starting heartbeat monitoring");
+                    // The actual connection monitoring happens in UpdateConnectionState()
+                }
+                
                 PublishTopics();
             }
             catch (Exception ex)
@@ -223,6 +330,10 @@ namespace QuestNav.Network
                     // Set to null to ensure complete recreation
                     frcDataSink = null;
                 }
+                
+                // Reset heartbeat detection state
+                robotHeartbeatDetected = false;
+                UpdateConnectionStatus(ConnectionStatus.Disconnected);
             }
         
             // Handle reconnection with fixed short delay
@@ -263,6 +374,8 @@ namespace QuestNav.Network
                 frcDataSink.PublishTopic(QuestNavConstants.Topics.QUATERNION, "float[]");
                 frcDataSink.PublishTopic(QuestNavConstants.Topics.EULER_ANGLES, "float[]");
                 frcDataSink.PublishTopic(QuestNavConstants.Topics.BATTERY, "double");
+                frcDataSink.PublishTopic(QuestNavConstants.Topics.QUEST_HEARTBEAT, "double");  // Changed to double
+                frcDataSink.PublishTopic(QuestNavConstants.Topics.CONNECTION_STATUS, "int");
             
                 // Subscribed by Quest (published by Robot)
                 frcDataSink.Subscribe(QuestNavConstants.Topics.MOSI, 0.1, false, false, false);
@@ -270,6 +383,7 @@ namespace QuestNav.Network
                 frcDataSink.Subscribe(QuestNavConstants.Topics.INIT_EULER, 0.1, false, false, false);
                 frcDataSink.Subscribe(QuestNavConstants.Topics.RESET_POSE, 0.1, false, false, false);
                 frcDataSink.Subscribe(QuestNavConstants.Topics.UPDATE_TRANSFORM, 0.1, false, false, false);
+                frcDataSink.Subscribe(QuestNavConstants.Topics.ROBOT_HEARTBEAT, 0.05, false, false, false);
             
                 topicsPublished = true;
                 Debug.Log("[QuestNetworkManager] Topics published successfully");

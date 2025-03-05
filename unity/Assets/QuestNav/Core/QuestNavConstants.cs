@@ -13,6 +13,10 @@
         public const float DATA_TIMEOUT = 5.0f;     // 5 seconds without data = stale connection
         public const float RECONNECT_DELAY = 0.25f; // Delay between reconnection attempts
         public const int SERVER_PORT = 5810;        // NetworkTables server port
+        
+        // Heartbeat constants
+        public const float HEARTBEAT_INTERVAL = 0.2f;  // 200ms between heartbeat sends
+        public const float HEARTBEAT_TIMEOUT = 1.0f;   // 1 second without heartbeat = degraded
     
         // Application identity
         public const string APP_NAME = "Quest3S";
@@ -56,6 +60,8 @@
             public const string QUATERNION = BASE_PATH + "quaternion";     // Rotation quaternion [x,y,z,w]
             public const string EULER_ANGLES = BASE_PATH + "eulerAngles";  // Euler angles [x,y,z]
             public const string BATTERY = BASE_PATH + "batteryPercent";    // Battery percentage
+            public const string QUEST_HEARTBEAT = BASE_PATH + "questHeartbeat"; // Quest heartbeat counter
+            public const string CONNECTION_STATUS = BASE_PATH + "connectionStatus"; // Connection status
         
             // Published by Robot
             public const string MOSI = BASE_PATH + "mosi";                      // Command code
@@ -63,6 +69,7 @@
             public const string INIT_EULER = BASE_PATH + "init/eulerAngles";    // Initial rotation
             public const string RESET_POSE = BASE_PATH + "resetpose";           // Reset pose data
             public const string UPDATE_TRANSFORM = BASE_PATH + "updateTransform"; // Transform update
+            public const string ROBOT_HEARTBEAT = BASE_PATH + "robotHeartbeat"; // Robot heartbeat counter
         }
     
         // Pose reset constants
