@@ -15,8 +15,10 @@
         public const int SERVER_PORT = 5810;        // NetworkTables server port
         
         // Heartbeat constants
-        public const float HEARTBEAT_INTERVAL = 0.2f;  // 200ms between heartbeat sends
-        public const float HEARTBEAT_TIMEOUT = 1.0f;   // 1 second without heartbeat = degraded
+        public const bool REQUIRE_HEARTBEAT = false;  // Set to false to disable heartbeat checks
+        public const float HEARTBEAT_REQUEST_INTERVAL = 0.2f;  // 200ms between heartbeat requests
+        public const float HEARTBEAT_RESPONSE_TIMEOUT = 1.0f;  // 1 second to respond = degraded
+        public const float HEARTBEAT_DISCONNECT_TIMEOUT = 3.0f; // 3 seconds without response = disconnected
     
         // Application identity
         public const string APP_NAME = "Quest3S";
@@ -60,7 +62,7 @@
             public const string QUATERNION = BASE_PATH + "quaternion";     // Rotation quaternion [x,y,z,w]
             public const string EULER_ANGLES = BASE_PATH + "eulerAngles";  // Euler angles [x,y,z]
             public const string BATTERY = BASE_PATH + "batteryPercent";    // Battery percentage
-            public const string QUEST_HEARTBEAT = BASE_PATH + "questHeartbeat"; // Quest heartbeat counter
+            public const string HEARTBEAT_REQUEST = BASE_PATH + "heartbeatReq";  // Quest heartbeat request
             public const string CONNECTION_STATUS = BASE_PATH + "connectionStatus"; // Connection status
         
             // Published by Robot
@@ -69,7 +71,7 @@
             public const string INIT_EULER = BASE_PATH + "init/eulerAngles";    // Initial rotation
             public const string RESET_POSE = BASE_PATH + "resetpose";           // Reset pose data
             public const string UPDATE_TRANSFORM = BASE_PATH + "updateTransform"; // Transform update
-            public const string ROBOT_HEARTBEAT = BASE_PATH + "robotHeartbeat"; // Robot heartbeat counter
+            public const string HEARTBEAT_RESPONSE = BASE_PATH + "heartbeatResp"; // Robot heartbeat response
         }
     
         // Pose reset constants
