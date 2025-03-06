@@ -1,0 +1,114 @@
+using System.Collections;
+using UnityEngine;
+using QuestNav.Commands;
+using QuestNav.Network;
+using QuestNav.Telemetry;
+using QuestNav.Transformation;
+using QuestNav.UI;
+
+namespace QuestNav.Core
+{
+    /// <summary>
+    /// Main component that coordinates all QuestNav subsystems
+    /// </summary>
+    public class QuestNavCore : MonoBehaviour
+    {
+        #region Unity References
+        /// <summary>
+        /// Reference to the OVR Camera Rig for tracking
+        /// </summary>
+        public OVRCameraRig cameraRig;
+
+        /// <summary>
+        /// Reference to the VR camera transform
+        /// </summary>
+        [SerializeField] 
+        public Transform vrCamera;
+
+        /// <summary>
+        /// Reference to the VR camera root transform
+        /// </summary>
+        [SerializeField] 
+        public Transform vrCameraRoot;
+
+        /// <summary>
+        /// Reference to the reset position transform
+        /// </summary>
+        [SerializeField] 
+        public Transform resetTransform;
+        #endregion
+
+        #region Component References
+        [SerializeField] private NetworkTableManager networkTableManager;
+        [SerializeField] private CommandManager commandManager;
+        [SerializeField] private TelemetryPublisher telemetryPublisher;
+        [SerializeField] private QuestNavUI uiManager;
+        #endregion
+
+        /// <summary>
+        /// Quest display frequency (in Hz)
+        /// </summary>
+        private float displayFrequency = 120.0f;
+        
+        /// <summary>
+        /// Counter for updating UI less frequently than per-frame
+        /// </summary>
+        private int delayCounter = 0;
+
+        void Start()
+        {
+            // Set display frequency for Quest
+            OVRPlugin.systemDisplayFrequency = displayFrequency;
+            
+            // Initialize all subsystems
+            InitializeSubsystems();
+            
+            QueuedLogger.Log("[QuestNavCore] System initialized");
+        }
+
+        /// <summary>
+        /// Initialize all QuestNav subsystems
+        /// </summary>
+        private void InitializeSubsystems()
+        {
+            // Initialize network manager first as other systems depend on it
+            networkTableManager.Initialize();
+            
+            // Initialize remaining subsystems
+            commandManager.Initialize(networkTableManager, vrCamera, vrCameraRoot, resetTransform);
+            telemetryPublisher.Initialize(networkTableManager, cameraRig);
+            uiManager.Initialize(networkTableManager);
+        }
+
+        void LateUpdate()
+        {
+            // Handle Network Connectivity
+            if (networkTableManager.IsConnected())
+            {
+                // Publish telemetry data
+                telemetryPublisher.PublishTelemetry();
+                
+                // Process any incoming commands
+                commandManager.ProcessCommands();
+            }
+            
+            // Update UI at a reduced frequency to improve performance
+            if (delayCounter >= (int)displayFrequency)
+            {
+                uiManager.UpdateStatusDisplay();
+                delayCounter = 0;
+            }
+            else
+            {
+                delayCounter++;
+            }
+        }
+
+        void OnApplicationQuit()
+        {
+            // Ensure clean shutdown
+            networkTableManager.Disconnect();
+            QueuedLogger.Log("[QuestNavCore] System shutdown complete");
+        }
+    }
+}
