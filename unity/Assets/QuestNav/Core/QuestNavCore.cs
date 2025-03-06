@@ -60,6 +60,13 @@ namespace QuestNav.Core
             // Set display frequency for Quest
             OVRPlugin.systemDisplayFrequency = displayFrequency;
             
+            // Log simulation mode status
+            if (QuestNavConstants.USE_SIMULATION_MODE)
+            {
+                QueuedLogger.Log("[QuestNavCore] Running in SIMULATION MODE");
+                QueuedLogger.Log("[QuestNavCore] Using simulation IP: " + QuestNavConstants.SIMULATION_IP_ADDRESS);
+            }
+            
             // Initialize all subsystems
             InitializeSubsystems();
             

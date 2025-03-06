@@ -24,7 +24,22 @@ namespace QuestNav.Core
         /// <summary>
         /// Default team number
         /// </summary>
-        public const string DEFAULT_TEAM_NUMBER = "9999";
+        public const string DEFAULT_TEAM_NUMBER = "5152";
+        
+        /// <summary>
+        /// Flag to enable simulation mode
+        /// </summary>
+        public const bool USE_SIMULATION_MODE = true;
+        
+        /// <summary>
+        /// IP address to use when in simulation mode
+        /// </summary>
+        public const string SIMULATION_IP_ADDRESS = "10.0.0.113";
+        
+        /// <summary>
+        /// Port to use when in simulation mode (can be different from SERVER_PORT)
+        /// </summary>
+        public const int SIMULATION_PORT = 5810; // Use same as SERVER_PORT by default
         #endregion
         
         #region NetworkTables Topic Paths

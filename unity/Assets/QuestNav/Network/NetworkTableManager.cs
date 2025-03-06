@@ -226,14 +226,25 @@ namespace QuestNav.Network
         private async Task AttemptConnectionAsync()
         {
             bool connectionEstablished = false;
-            List<string> candidateAddresses = new List<string>()
+            
+            // If simulation mode is enabled, only try the simulation IP
+            List<string> candidateAddresses = new List<string>();
+            if (QuestNavConstants.USE_SIMULATION_MODE)
             {
-                GenerateIP(),
-                "172.22.11.2",
-                $"roboRIO-{teamNumber}-FRC.local",
-                $"roboRIO-{teamNumber}-FRC.lan",
-                $"roboRIO-{teamNumber}-FRC.frc-field.local"
-            };
+                candidateAddresses.Add(QuestNavConstants.SIMULATION_IP_ADDRESS);
+                QueuedLogger.Log("[NetworkTableManager] Using simulation mode with IP: " + QuestNavConstants.SIMULATION_IP_ADDRESS);
+            }
+            else
+            {
+                candidateAddresses.AddRange(new List<string>()
+                {
+                    GenerateIP(),
+                    "172.22.11.2",
+                    $"roboRIO-{teamNumber}-FRC.local",
+                    $"roboRIO-{teamNumber}-FRC.lan",
+                    $"roboRIO-{teamNumber}-FRC.frc-field.local"
+                });
+            }
             
             while (!connectionEstablished)
             {
@@ -265,20 +276,29 @@ namespace QuestNav.Network
                     string resolvedAddress = candidate;
                     try
                     {
-                        // Use asynchronous DNS resolution
-                        IPHostEntry hostEntry = await Dns.GetHostEntryAsync(candidate);
-                        IPAddress[] ipv4Addresses = hostEntry.AddressList
-                            .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                            .ToArray();
-                        if (ipv4Addresses.Length > 0)
+                        // Skip DNS resolution for simulation IP address and use it directly
+                        if (QuestNavConstants.USE_SIMULATION_MODE && candidate == QuestNavConstants.SIMULATION_IP_ADDRESS)
                         {
-                            resolvedAddress = ipv4Addresses[0].ToString();
+                            resolvedAddress = candidate;
+                            cycleLog.AppendLine($"Using simulation IP directly: {resolvedAddress}");
                         }
                         else
                         {
-                            cycleLog.AppendLine($"DNS lookup returned no IPv4 for candidate '{candidate}'.");
-                            failedCandidates[candidate] = Time.time;
-                            continue;
+                            // Use asynchronous DNS resolution for regular IPs
+                            IPHostEntry hostEntry = await Dns.GetHostEntryAsync(candidate);
+                            IPAddress[] ipv4Addresses = hostEntry.AddressList
+                                .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                                .ToArray();
+                            if (ipv4Addresses.Length > 0)
+                            {
+                                resolvedAddress = ipv4Addresses[0].ToString();
+                            }
+                            else
+                            {
+                                cycleLog.AppendLine($"DNS lookup returned no IPv4 for candidate '{candidate}'.");
+                                failedCandidates[candidate] = Time.time;
+                                continue;
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -293,12 +313,28 @@ namespace QuestNav.Network
                     try
                     {
                         // Wrap the potentially blocking connection call in Task.Run
+                        int port = QuestNavConstants.USE_SIMULATION_MODE ? QuestNavConstants.SIMULATION_PORT : QuestNavConstants.SERVER_PORT;
+                        QueuedLogger.Log($"[NetworkTableManager] Attempting connection to {resolvedAddress} on port {port}...");
+                        
                         var sink = await Task.Run(() =>
                         {
-                            return new Nt4Source(QuestNavConstants.APP_NAME, resolvedAddress, true, QuestNavConstants.SERVER_PORT);
+                            try
+                            {
+                                QueuedLogger.Log($"[NetworkTableManager] Creating NT4Source with app={QuestNavConstants.APP_NAME}, server={resolvedAddress}, port={port}");
+                                return new Nt4Source(QuestNavConstants.APP_NAME, resolvedAddress, true, port);
+                            }
+                            catch (Exception innerEx)
+                            {
+                                QueuedLogger.LogError($"[NetworkTableManager] NT4Source creation error: {innerEx.Message}");
+                                if (innerEx.InnerException != null)
+                                {
+                                    QueuedLogger.LogError($"[NetworkTableManager] Inner exception: {innerEx.InnerException.Message}");
+                                }
+                                return null;
+                            }
                         });
                         
-                        if (sink.Connected())
+                        if (sink != null && sink.Connected())
                         {
                             ipAddress = resolvedAddress; // Cache the working address
                             nt = sink;

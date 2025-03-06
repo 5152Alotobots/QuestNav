@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using QuestNav.Network;
 using QuestNav.Telemetry;
+using QuestNav.Core;
 
 namespace QuestNav.UI
 {
@@ -97,14 +98,23 @@ namespace QuestNav.UI
         /// </summary>
         private void UpdateIPAddressText()
         {
-            // Get the local IP
+            TextMeshProUGUI ipText = ipAddressText as TextMeshProUGUI;
+            
+            if (QuestNavConstants.USE_SIMULATION_MODE)
+            {
+                // Show simulation mode in UI
+                ipText.text = "SIM MODE: " + QuestNavConstants.SIMULATION_IP_ADDRESS + ":" + QuestNavConstants.SIMULATION_PORT;
+                ipText.color = Color.yellow;
+                return;
+            }
+            
+            // Normal mode - show local IP
             IPHostEntry hostEntry = Dns.GetHostEntry(Dns.GetHostName());
             foreach (IPAddress ip in hostEntry.AddressList)
             {
                 if (ip.AddressFamily == AddressFamily.InterNetwork)
                 {
                     myAddressLocal = ip.ToString();
-                    TextMeshProUGUI ipText = ipAddressText as TextMeshProUGUI;
                     if (myAddressLocal == "127.0.0.1")
                     {
                         ipText.text = "No Adapter Found";
