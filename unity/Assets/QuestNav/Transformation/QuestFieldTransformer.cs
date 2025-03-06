@@ -7,7 +7,6 @@ namespace QuestNav.Transformation
     /// </summary>
     public static class QuestFieldTransformer
     {
-
         /// <summary>
         /// Converts FRC field coordinates to Unity world coordinates
         /// </summary>
@@ -23,21 +22,17 @@ namespace QuestNav.Transformation
             float heightPreserve = 0f)
         {
             // Convert FRC coordinates to Unity coordinates:
-            // - Unity X = -FRC Y (right is positive in Unity)
-            // - Unity Y = kept as provided height parameter
-            // - Unity Z = FRC X (forward is positive in both)
+            // Unity Z = FRC X, Unity X = -FRC Y, Unity Y = height
             Vector3 unityPosition = new Vector3(
                 -frcY,
                 heightPreserve,
                 frcX
             );
 
-            // Convert FRC rotation to Unity rotation:
-            // - Unity uses clockwise positive rotation around Y
-            // - FRC uses counterclockwise positive rotation
-            float unityYawDegrees = -frcRotationDegrees;  // Negate for Unity's rotation direction
+            // Convert FRC rotation (CCW positive) to Unity rotation (CW positive)
+            float unityYawDegrees = -frcRotationDegrees;
         
-            // Create quaternion from Euler angles (only Y rotation matters for top-down view)
+            // Create quaternion from Euler angles
             Quaternion unityRotation = Quaternion.Euler(0, unityYawDegrees, 0);
 
             return (unityPosition, unityRotation);
@@ -54,8 +49,7 @@ namespace QuestNav.Transformation
             Quaternion unityRotation)
         {
             // Convert Unity coordinates to FRC coordinates:
-            // - FRC X = Unity Z
-            // - FRC Y = -Unity X
+            // FRC X = Unity Z, FRC Y = -Unity X
             float frcX = unityPosition.z;
             float frcY = -unityPosition.x;
 
@@ -69,7 +63,7 @@ namespace QuestNav.Transformation
             // Convert to FRC rotation (CCW positive)
             float frcRotationDegrees = -unityYawDegrees;
         
-            // Normalize to -180 to 180 range
+            // Normalize to -180 to 180 range for FRC convention
             while (frcRotationDegrees > 180) frcRotationDegrees -= 360;
             while (frcRotationDegrees <= -180) frcRotationDegrees += 360;
 
@@ -124,7 +118,6 @@ namespace QuestNav.Transformation
         public static Quaternion TransformRotation(Matrix4x4 transformMatrix, Quaternion rotation)
         {
             // Extract the rotation from the transformation matrix
-            // This works because we're not using scaling
             return Quaternion.LookRotation(
                 transformMatrix.GetColumn(2),  // Forward direction
                 transformMatrix.GetColumn(1)   // Up direction
