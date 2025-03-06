@@ -33,6 +33,13 @@ namespace QuestNav.Network
         // Standby recovery tracking
         private bool isRecoveringFromStandby = false;
         
+        // Focus loss handling
+        private bool hasLostFocus = false;
+        private float focusRecoveryAttempts = 0;
+        private float focusRecoveryTimer = 0f;
+        private const float FOCUS_RECOVERY_INTERVAL = 0.5f; // More frequent checks during focus recovery
+        private const int MAX_FOCUS_RECOVERY_ATTEMPTS = 5;
+        
         /// <summary>
         /// Connection status enum defining possible connection states
         /// </summary>
@@ -142,6 +149,12 @@ namespace QuestNav.Network
         {
             // Update heartbeat timer
             heartbeatTimer += Time.deltaTime;
+            
+            // If we're in focus recovery mode, handle it separately
+            if (hasLostFocus)
+            {
+                return HandleFocusRecovery();
+            }
             
             // Check if we have NT connection
             bool ntConnected = frcDataSink != null && frcDataSink.Client != null && frcDataSink.Client.Connected();
@@ -264,6 +277,9 @@ namespace QuestNav.Network
             lastReceivedResponseId = 0;
             heartbeatTimer = QuestNavConstants.HEARTBEAT_REQUEST_INTERVAL; // Force immediate heartbeat
             
+            // Enter focus recovery mode with more aggressive connection checking
+            EnterFocusRecoveryMode();
+            
             // Flag connection as potentially stale
             UpdateConnectionStatus(ConnectionStatus.Degraded);
             
@@ -285,6 +301,80 @@ namespace QuestNav.Network
                     }
                 }
             }
+        }
+        
+        /// <summary>
+        /// Enters focus recovery mode with accelerated connection checks
+        /// </summary>
+        private void EnterFocusRecoveryMode()
+        {
+            Debug.Log("[QuestNetworkManager] Entering focus recovery mode");
+            hasLostFocus = true;
+            focusRecoveryAttempts = 0;
+            focusRecoveryTimer = 0f;
+        }
+        
+        /// <summary>
+        /// Handles more aggressive connection recovery after focus loss
+        /// </summary>
+        private bool HandleFocusRecovery()
+        {
+            // Update recovery timer
+            focusRecoveryTimer += Time.deltaTime;
+            
+            // Check connection more frequently during focus recovery
+            if (focusRecoveryTimer >= FOCUS_RECOVERY_INTERVAL)
+            {
+                focusRecoveryTimer = 0f;
+                focusRecoveryAttempts++;
+                
+                Debug.Log($"[QuestNetworkManager] Focus recovery attempt {focusRecoveryAttempts}/{MAX_FOCUS_RECOVERY_ATTEMPTS}");
+                
+                // Check if we have a valid connection
+                bool ntConnected = frcDataSink != null && 
+                                  frcDataSink.Client != null && 
+                                  frcDataSink.Client.Connected() && 
+                                  frcDataSink.Client.ValidateConnection();
+                
+                if (ntConnected)
+                {
+                    // Validate connection with a ping
+                    if (frcDataSink.Client.ValidateConnection())
+                    {
+                        Debug.Log("[QuestNetworkManager] Focus recovery successful, connection validated");
+                        hasLostFocus = false;
+                        isRecoveringFromStandby = false;
+                        
+                        // Ensure topics are published
+                        if (!topicsPublished)
+                        {
+                            PublishTopics();
+                        }
+                        
+                        UpdateConnectionStatus(ConnectionStatus.Connected);
+                        return true;
+                    }
+                }
+                
+                // Force a reconnection if too many attempts have failed
+                if (focusRecoveryAttempts >= MAX_FOCUS_RECOVERY_ATTEMPTS)
+                {
+                    Debug.Log("[QuestNetworkManager] Max focus recovery attempts reached, forcing reconnection");
+                    hasLostFocus = false;
+                    ForceReconnect();
+                    return false;
+                }
+                
+                // Check if we need to force a reconnection
+                if (!ntConnected && focusRecoveryAttempts > 2)
+                {
+                    Debug.Log("[QuestNetworkManager] Focus recovery detected connection issue, initiating reconnection");
+                    HandleDisconnectedState();
+                }
+            }
+            
+            // Continue treating connection as degraded during recovery
+            return false;
         }
     
         /// <summary>
@@ -417,9 +507,16 @@ namespace QuestNav.Network
                 reconnectTimer = 0f;
                 
                 // If we've tried too many times, slow down to avoid overwhelming the network
-                if (reconnectAttempts > 10 && !isRecoveringFromStandby) 
+                if (reconnectAttempts > 10 && !isRecoveringFromStandby && !hasLostFocus) 
                 {
                     reconnectTimer = -1.0f;  // Add a longer delay
+                }
+                
+                // After some reconnection attempts, if we're still in focus recovery mode, exit it
+                if (hasLostFocus && reconnectAttempts >= MAX_FOCUS_RECOVERY_ATTEMPTS)
+                {
+                    Debug.Log("[QuestNetworkManager] Exiting focus recovery mode after multiple reconnection attempts");
+                    hasLostFocus = false;
                 }
             }
         }
@@ -488,6 +585,11 @@ namespace QuestNav.Network
             lastHeartbeatRequestId = 0;
             lastReceivedResponseId = 0;
             
+            // Reset focus recovery state
+            hasLostFocus = false;
+            focusRecoveryAttempts = 0;
+            isRecoveringFromStandby = false;
+            
             // Immediate reconnection attempt
             reconnectTimer = QuestNavConstants.RECONNECT_DELAY;
             reconnectAttempts = 0;
@@ -503,6 +605,20 @@ namespace QuestNav.Network
         private string GetDNS()
         {
             return QuestNavConstants.SERVER_DNS_FORMAT.Replace("####", teamNumber);
+        }
+        
+        /// <summary>
+        /// Performs a validation of the current connection
+        /// </summary>
+        /// <returns>True if connection is considered valid</returns>
+        public bool ValidateConnection()
+        {
+            if (frcDataSink == null || frcDataSink.Client == null)
+            {
+                return false;
+            }
+            
+            return frcDataSink.Client.ValidateConnection();
         }
 
         /// <summary>
@@ -522,5 +638,10 @@ namespace QuestNav.Network
             string amPart = teamNumber.Length > 2 ? teamNumber.Substring(teamNumber.Length - 2) : teamNumber;
             return QuestNavConstants.SERVER_ADDRESS_FORMAT.Replace("TE", tePart).Replace("AM", amPart);
         }
+        
+        /// <summary>
+        /// Gets if we're currently in focus recovery mode
+        /// </summary>
+        public bool IsInFocusRecovery => hasLostFocus;
     }
 }

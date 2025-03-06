@@ -65,6 +65,14 @@ namespace QuestNav.Core
             // Set display refresh rate
             OVRPlugin.systemDisplayFrequency = 120.0f;
             
+            // Configure Oculus performance settings
+            OVRManager.suggestedCpuPerfLevel = OVRManager.ProcessorPerformanceLevel.SustainedHigh;
+            OVRManager.suggestedGpuPerfLevel = OVRManager.ProcessorPerformanceLevel.SustainedHigh;
+            
+            // Prevent screen from sleeping
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
+            Application.runInBackground = true;
+            
             // Get UI Manager reference and initialize it
             uiManager = GetComponent<QuestUIManager>();
             uiManager.Initialize();
@@ -152,11 +160,55 @@ namespace QuestNav.Core
             {
                 // App is resuming from pause (waking from standby)
                 Debug.Log("[MotionStreamer] Application resumed from standby");
+                // Ensure screen won't sleep
+                Screen.sleepTimeout = SleepTimeout.NeverSleep;
+                
                 if (networkManager != null)
                 {
                     networkManager.HandleStandbyExit();
                 }
             }
+        }
+        
+        /// <summary>
+        /// Handles focus changes in the application
+        /// </summary>
+        /// <param name="hasFocus">Whether the application has focus</param>
+        void OnApplicationFocus(bool hasFocus)
+        {
+            if (hasFocus)
+            {
+                // App gained focus
+                Debug.Log("[MotionStreamer] Application focus regained");
+                Screen.sleepTimeout = SleepTimeout.NeverSleep;
+                
+                if (networkManager != null)
+                {
+                    // Similar to standby exit, consider reconnecting if needed
+                    networkManager.HandleStandbyExit();
+                }
+            }
+            else
+            {
+                // App lost focus
+                Debug.Log("[MotionStreamer] Application focus lost");
+                
+                if (networkManager != null)
+                {
+                    // Similar to standby enter, prepare for potential network issues
+                    networkManager.HandleStandbyEnter();
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Called when the component is enabled
+        /// </summary>
+        void OnEnable()
+        {
+            // Ensure these settings are applied whenever the component is enabled
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
+            Application.runInBackground = true;
         }
         
         /// <summary>
