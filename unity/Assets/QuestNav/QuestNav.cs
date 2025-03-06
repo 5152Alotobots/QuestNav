@@ -1,5 +1,4 @@
 using UnityEngine;
-using NetworkTables;
 using System.Net;
 using System.Linq;
 using System.Net.Sockets;
@@ -10,6 +9,7 @@ using System.Collections.Generic;
 using System.Collections;
 using System.Text;
 using System.Threading.Tasks;
+using NetworkTablesSharp;
 
 /// <summary>
 /// Extension methods for Unity's Vector3 class to convert to array format.
@@ -83,7 +83,7 @@ public class QuestNav : MonoBehaviour
     /// <summary>
     /// NetworkTables connection for FRC data communication
     /// </summary>
-    public Nt4Source frcDataSink = null;
+    public Nt4Source nt = null;
 
     /// <summary>
     /// Current command received from the robot
@@ -239,12 +239,12 @@ public class QuestNav : MonoBehaviour
     void LateUpdate()
     {
         // If the connection isn’t ready, skip the update.
-        if (frcDataSink == null || !frcDataSink.Client.Connected())
+        if (nt == null || !nt.Connected())
         {
             return;
         }
 
-        if (frcDataSink.Client.Connected())
+        if (nt.Connected())
         {
             PublishFrameData();
             ProcessCommands();
@@ -365,13 +365,13 @@ public class QuestNav : MonoBehaviour
                     // Wrap the potentially blocking connection call in Task.Run.
                     var sink = await Task.Run(() =>
                     {
-                        return new Nt4Source(appName, resolvedAddress, serverPort);
+                        return new Nt4Source(appName, resolvedAddress, true, serverPort);
                     });
 
-                    if (sink.Client.Connected())
+                    if (sink.Connected())
                     {
                         ipAddress = resolvedAddress; // Cache the working address.
-                        frcDataSink = sink;
+                        nt = sink;
                         cycleLog.AppendLine($"Connected successfully to {resolvedAddress}.");
                         connectionEstablished = true;
                         break;
@@ -409,7 +409,7 @@ public class QuestNav : MonoBehaviour
     private void HandleDisconnectedState()
     {
         QueuedLogger.Log("[QuestNav] Robot disconnected. Resetting connection and attempting to reconnect...");
-        frcDataSink.Client.Disconnect();
+        nt.Disconnect();
         ConnectToRobot();
     }
 
@@ -418,17 +418,17 @@ public class QuestNav : MonoBehaviour
     /// </summary>
     private void PublishTopics()
     {
-        frcDataSink.PublishTopic("/questnav/miso", "int");
-        frcDataSink.PublishTopic("/questnav/frameCount", "int");
-        frcDataSink.PublishTopic("/questnav/timestamp", "double");
-        frcDataSink.PublishTopic("/questnav/position", "float[]");
-        frcDataSink.PublishTopic("/questnav/quaternion", "float[]");
-        frcDataSink.PublishTopic("/questnav/eulerAngles", "float[]");
-        frcDataSink.PublishTopic("/questnav/batteryPercent", "double");
-        frcDataSink.Subscribe("/questnav/mosi", 0.1, false, false, false);
-        frcDataSink.Subscribe("/questnav/init/position", 0.1, false, false, false);
-        frcDataSink.Subscribe("/questnav/init/eulerAngles", 0.1, false, false, false);
-        frcDataSink.Subscribe("/questnav/resetpose", 0.1, false, false, false);
+        nt.PublishTopic("/questnav/miso", "int");
+        nt.PublishTopic("/questnav/frameCount", "int");
+        nt.PublishTopic("/questnav/timestamp", "double");
+        nt.PublishTopic("/questnav/position", "float[]");
+        nt.PublishTopic("/questnav/quaternion", "float[]");
+        nt.PublishTopic("/questnav/eulerAngles", "float[]");
+        nt.PublishTopic("/questnav/batteryPercent", "double");
+        nt.Subscribe("/questnav/mosi", 0.1, false, false, false);
+        nt.Subscribe("/questnav/init/position", 0.1, false, false, false);
+        nt.Subscribe("/questnav/init/eulerAngles", 0.1, false, false, false);
+        nt.Subscribe("/questnav/resetpose", 0.1, false, false, false);
     }
     #endregion
 
@@ -445,12 +445,12 @@ public class QuestNav : MonoBehaviour
         eulerAngles = cameraRig.centerEyeAnchor.eulerAngles;
         batteryPercent = SystemInfo.batteryLevel * 100;
 
-        frcDataSink.PublishValue("/questnav/frameCount", frameIndex);
-        frcDataSink.PublishValue("/questnav/timestamp", timeStamp);
-        frcDataSink.PublishValue("/questnav/position", position.ToArray());
-        frcDataSink.PublishValue("/questnav/quaternion", rotation.ToArray());
-        frcDataSink.PublishValue("/questnav/eulerAngles", eulerAngles.ToArray());
-        frcDataSink.PublishValue("/questnav/batteryPercent", batteryPercent);
+        nt.PublishValue("/questnav/frameCount", frameIndex);
+        nt.PublishValue("/questnav/timestamp", timeStamp);
+        nt.PublishValue("/questnav/position", position.ToArray());
+        nt.PublishValue("/questnav/quaternion", rotation.ToArray());
+        nt.PublishValue("/questnav/eulerAngles", eulerAngles.ToArray());
+        nt.PublishValue("/questnav/batteryPercent", batteryPercent);
     }
     #endregion
 
@@ -460,7 +460,7 @@ public class QuestNav : MonoBehaviour
     /// </summary>
     private void ProcessCommands()
     {
-        command = frcDataSink.GetLong("/questnav/mosi");
+        command = nt.GetValue<long>("/questnav/mosi");
 
         if (resetInProgress && command == 0)
         {
@@ -490,12 +490,12 @@ public class QuestNav : MonoBehaviour
                 break;
             case 3:
                 QueuedLogger.Log("[QuestNav] Ping received, responding...");
-                frcDataSink.PublishValue("/questnav/miso", 97);  // 97 for ping response
+                nt.PublishValue("/questnav/miso", 97);  // 97 for ping response
                 break;
             default:
                 if (!resetInProgress)
                 {
-                    frcDataSink.PublishValue("/questnav/miso", 0);
+                    nt.PublishValue("/questnav/miso", 0);
                 }
                 break;
         }
@@ -531,7 +531,7 @@ public class QuestNav : MonoBehaviour
 
                 // Read the pose array from NetworkTables
                 // Format: [X, Y, Rotation] in FRC field coordinates
-                resetPose = frcDataSink.GetDoubleArray("/questnav/resetpose");
+                resetPose = nt.GetValue<double[]>("/questnav/resetpose");
 
                 // Validate pose data format and field boundaries
                 if (resetPose != null && resetPose.Length == 3) {
@@ -630,12 +630,12 @@ public class QuestNav : MonoBehaviour
                 QueuedLogger.LogWarning($"[QuestNav] Large position error detected!");
             }
 
-            frcDataSink.PublishValue("/questnav/miso", 98);
+            nt.PublishValue("/questnav/miso", 98);
         }
         catch (Exception e) {
             QueuedLogger.LogError($"[QuestNav] Error during pose reset: {e.Message}");
             QueuedLogger.LogException(e);
-            frcDataSink.PublishValue("/questnav/miso", 0);
+            nt.PublishValue("/questnav/miso", 0);
             resetInProgress = false;
         }
     }
@@ -654,12 +654,12 @@ public class QuestNav : MonoBehaviour
             Vector3 distanceDiff = resetTransform.position - vrCamera.position;
             vrCameraRoot.transform.position += distanceDiff;
 
-            frcDataSink.PublishValue("/questnav/miso", 99);
+            nt.PublishValue("/questnav/miso", 99);
         }
         catch (Exception e) {
             QueuedLogger.LogError($"[QuestNav] Error during pose reset: {e.Message}");
             QueuedLogger.LogException(e);
-            frcDataSink.PublishValue("/questnav/miso", 0);
+            nt.PublishValue("/questnav/miso", 0);
             resetInProgress = false;
         }
     }
@@ -689,13 +689,13 @@ public class QuestNav : MonoBehaviour
         }
 
         // Disconnect existing connection, if any.
-        if (frcDataSink != null)
+        if (nt != null)
         {
-            if (frcDataSink.Client.Connected())
+            if (nt.Connected())
             {
-                frcDataSink.Client.Disconnect();
+                nt.Disconnect();
             }
-            frcDataSink = null;
+            nt = null;
         }
 
         // Restart the asynchronous connection process.
