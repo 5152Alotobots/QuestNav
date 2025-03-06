@@ -49,7 +49,7 @@ namespace QuestNav.Commands
                 nt.PublishValue(QuestNavConstants.Topics.MISO, QuestNavConstants.RESP_DISCONNECT);
                 
                 // Wait a moment for the message to be sent
-                System.Threading.Thread.Sleep(100);
+                System.Threading.Thread.Sleep(QuestNavConstants.MESSAGE_SEND_DELAY_MS);
                 
                 // Disconnect from the robot
                 networkManager.Disconnect();

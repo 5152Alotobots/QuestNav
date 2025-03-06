@@ -226,7 +226,7 @@ namespace QuestNav.Core
                     Debug.Log("[MotionStreamer] Sent shutdown notification to robot");
                     
                     // Allow some time for the message to be sent before disconnecting
-                    System.Threading.Thread.Sleep(100);
+                    System.Threading.Thread.Sleep(QuestNavConstants.MESSAGE_SEND_DELAY_MS);
                     
                     // Properly disconnect
                     networkManager.Disconnect();

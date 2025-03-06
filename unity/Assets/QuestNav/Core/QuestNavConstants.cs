@@ -45,7 +45,17 @@
         public const int RESP_PING_RESPONSE = 97;
         public const int RESP_POSE_RESET_SUCCESS = 98;
         public const int RESP_HEADING_RESET_SUCCESS = 99;
-    
+        
+        // Network and connection constants
+        public const float CONNECTION_SLOW_RETRY_DELAY = 1.0f;     // Extended delay for slower reconnection retry
+        public const int MAX_QUICK_RECONNECT_ATTEMPTS = 10;        // Number of attempts before slowing down reconnection
+        public const int MESSAGE_SEND_DELAY_MS = 100;              // Delay to ensure messages are sent before disconnecting
+        public const int SOCKET_CLEANUP_DELAY_MS = 50;             // Delay to allow system resources to be freed
+
+// Heartbeat monitoring constants
+        public const int HEARTBEAT_DEGRADED_THRESHOLD = 5;         // Requests without response before degraded state
+        public const int HEARTBEAT_DISCONNECT_THRESHOLD = 15;      // Requests without response before disconnection
+        
         // NetworkTables paths
         public static class Topics
         {

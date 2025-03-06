@@ -213,7 +213,7 @@ namespace QuestNav.Network
                 
                 // If we haven't received any responses yet, but we haven't been trying for long
                 // consider the connection in a connecting state
-                if (lastReceivedResponseId == 0 && lastHeartbeatRequestId < 5)
+                if (lastReceivedResponseId == 0 && lastHeartbeatRequestId < QuestNavConstants.HEARTBEAT_DEGRADED_THRESHOLD)
                 {
                     UpdateConnectionStatus(ConnectionStatus.Connecting);
                 }
@@ -473,7 +473,7 @@ namespace QuestNav.Network
                         System.GC.WaitForPendingFinalizers();
                         
                         // Wait a small amount to allow system resources to be freed
-                        System.Threading.Thread.Sleep(50);
+                        System.Threading.Thread.Sleep(QuestNavConstants.MESSAGE_SEND_DELAY_MS);
                     }
                     catch (Exception ex)
                     {
