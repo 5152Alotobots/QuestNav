@@ -346,7 +346,7 @@ namespace QuestNav.Network
             }
             else
             {
-                return "10.0.0.2";
+                return QuestNavConstants.NetworkDefaults.FALLBACK_IP;
             }
         }
     }

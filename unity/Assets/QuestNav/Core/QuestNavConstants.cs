@@ -68,8 +68,25 @@ namespace QuestNav.Core
         #endregion
         
         #region Field Dimensions
-        public const float FIELD_LENGTH = 16.54f;  // FRC field length in meters
-        public const float FIELD_WIDTH = 8.02f;    // FRC field width in meters
+        /// <summary>
+        /// Field limit constants
+        /// </summary>
+        public static class FieldLimits
+        {
+            /// <summary>
+            /// Minimum X coordinate on field (meters)
+            /// </summary>
+            public const float MIN_FIELD_X = 0f;
+            
+            /// <summary>
+            /// Minimum Y coordinate on field (meters)
+            /// </summary>
+            public const float MIN_FIELD_Y = 0f;
+
+            public const float FIELD_LENGTH = 16.54f;  // FRC field length in meters
+            public const float FIELD_WIDTH = 8.02f;    // FRC field width in meters
+        }
+        
         #endregion
         
         #region Connection Configuration
@@ -92,6 +109,51 @@ namespace QuestNav.Core
         /// Delay to wait when network is unreachable
         /// </summary>
         public const int UNREACHABLE_NETWORK_DELAY = 5;
+
+        #endregion
+
+        #region Thresholds and Limits
+        /// <summary>
+        /// Thresholds for various operations
+        /// </summary>
+        public static class Thresholds
+        {
+            /// <summary>
+            /// Position error threshold for pose reset (1cm)
+            /// </summary>
+            public const float POSITION_ERROR_THRESHOLD = 0.01f;
+            
+            /// <summary>
+            /// Maximum retries for command operations
+            /// </summary>
+            public const int MAX_COMMAND_RETRIES = 3;
+            
+            /// <summary>
+            /// Delay between command retries in milliseconds
+            /// </summary>
+            public const float COMMAND_RETRY_DELAY_MS = 50f;
+            
+            /// <summary>
+            /// Default display refresh rate for Quest HMD in Hz
+            /// </summary>
+            public const float DEFAULT_DISPLAY_FREQUENCY = 120.0f;
+            
+            /// <summary>
+            /// Number of frames between UI updates
+            /// </summary>
+            public const int UI_UPDATE_INTERVAL = 120;
+        }
+
+        /// <summary>
+        /// Network-related defaults
+        /// </summary>
+        public static class NetworkDefaults
+        {
+            /// <summary>
+            /// Fallback IP address when team number format is invalid
+            /// </summary>
+            public const string FALLBACK_IP = "10.51.52.2";
+        }
         #endregion
     }
 }

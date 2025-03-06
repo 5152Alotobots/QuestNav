@@ -48,12 +48,12 @@ namespace QuestNav.Core
         /// <summary>
         /// Quest display frequency (in Hz)
         /// </summary>
-        private float displayFrequency = 120.0f;
+        private float displayFrequency = QuestNavConstants.Thresholds.DEFAULT_DISPLAY_FREQUENCY;
         
         /// <summary>
         /// Counter for updating UI less frequently than per-frame
         /// </summary>
-        private int delayCounter = 0;
+        private int uiUpdateCounter = 0;
 
         void Start()
         {
@@ -93,14 +93,14 @@ namespace QuestNav.Core
             }
             
             // Update UI at a reduced frequency to improve performance
-            if (delayCounter >= (int)displayFrequency)
+            if (uiUpdateCounter >= QuestNavConstants.Thresholds.UI_UPDATE_INTERVAL)
             {
                 uiManager.UpdateStatusDisplay();
-                delayCounter = 0;
+                uiUpdateCounter = 0;
             }
             else
             {
-                delayCounter++;
+                uiUpdateCounter++;
             }
         }
 

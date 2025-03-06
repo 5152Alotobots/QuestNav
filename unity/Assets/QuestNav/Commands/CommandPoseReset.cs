@@ -19,10 +19,6 @@ namespace QuestNav.Commands
         public long ResponseCode => QuestNavConstants.Commands.POSE_RESET_COMPLETE;
         public long CommandId => QuestNavConstants.Commands.POSE_RESET;
         
-        // Constants for retry logic
-        private const int MAX_RETRIES = 3;
-        private const float RETRY_DELAY_MS = 50f;
-        
         /// <summary>
         /// Constructor
         /// </summary>
@@ -50,15 +46,15 @@ namespace QuestNav.Commands
                 int attemptCount = 0;
                 
                 // Attempt to read pose data from NetworkTables with retry logic
-                for (int i = 0; i < MAX_RETRIES && !success; i++)
+                for (int i = 0; i < QuestNavConstants.Thresholds.MAX_COMMAND_RETRIES && !success; i++)
                 {
                     attemptCount++;
                     
                     // Add delay between retries to allow for network latency
                     if (i > 0)
                     {
-                        Thread.Sleep((int)RETRY_DELAY_MS);
-                        QueuedLogger.Log($"[CommandPoseReset] Attempt {attemptCount} of {MAX_RETRIES}...");
+                        Thread.Sleep((int)QuestNavConstants.Thresholds.COMMAND_RETRY_DELAY_MS);
+                        QueuedLogger.Log($"[CommandPoseReset] Attempt {attemptCount} of {QuestNavConstants.Thresholds.MAX_COMMAND_RETRIES}...");
                     }
                     
                     QueuedLogger.Log($"[CommandPoseReset] Reading NetworkTables Values (Attempt {attemptCount}):");
@@ -71,8 +67,10 @@ namespace QuestNav.Commands
                     if (resetPose != null && resetPose.Length == 3)
                     {
                         // Check if pose is within valid field boundaries
-                        if (resetPose[0] < 0 || resetPose[0] > QuestNavConstants.FIELD_LENGTH ||
-                            resetPose[1] < 0 || resetPose[1] > QuestNavConstants.FIELD_WIDTH)
+                        if (resetPose[0] < QuestNavConstants.FieldLimits.MIN_FIELD_X || 
+                            resetPose[0] > QuestNavConstants.FieldLimits.FIELD_LENGTH ||
+                            resetPose[1] < QuestNavConstants.FieldLimits.MIN_FIELD_Y || 
+                            resetPose[1] > QuestNavConstants.FieldLimits.FIELD_WIDTH)
                         {
                             QueuedLogger.LogWarning($"[CommandPoseReset] Reset pose outside field boundaries: X:{resetPose[0]:F3} Y:{resetPose[1]:F3}");
                             continue;

@@ -1,5 +1,6 @@
 using UnityEngine;
 using QuestNav.Telemetry;
+using QuestNav.Core;
 
 namespace QuestNav.Transformation
 {
@@ -75,7 +76,7 @@ namespace QuestNav.Transformation
                 QueuedLogger.Log($"[PoseManager] Position error after reset: {posError:F3}m");
                 
                 // Warn if position error is larger than expected threshold
-                if (posError > 0.01f)  // 1cm threshold
+                if (posError > QuestNavConstants.Thresholds.POSITION_ERROR_THRESHOLD)
                 {
                     QueuedLogger.LogWarning($"[PoseManager] Large position error detected!");
                 }
