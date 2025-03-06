@@ -321,7 +321,7 @@ namespace QuestNav.Network
                             try
                             {
                                 QueuedLogger.Log($"[NetworkTableManager] Creating NT4Source with app={QuestNavConstants.APP_NAME}, server={resolvedAddress}, port={port}");
-                                return new Nt4Source(QuestNavConstants.APP_NAME, resolvedAddress, true, port);
+                                return new Nt4Source(resolvedAddress, QuestNavConstants.APP_NAME, true, port);
                             }
                             catch (Exception innerEx)
                             {
