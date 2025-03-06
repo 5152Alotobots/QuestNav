@@ -134,6 +134,32 @@ namespace QuestNav.Core
         }
         
         /// <summary>
+        /// Handles app pause and resume events, including standby
+        /// </summary>
+        /// <param name="pauseStatus">True if pausing, false if resuming</param>
+        void OnApplicationPause(bool pauseStatus)
+        {
+            if (pauseStatus)
+            {
+                // App is pausing (going to standby)
+                Debug.Log("[MotionStreamer] Application paused, preparing for standby");
+                if (networkManager != null)
+                {
+                    networkManager.HandleStandbyEnter();
+                }
+            }
+            else
+            {
+                // App is resuming from pause (waking from standby)
+                Debug.Log("[MotionStreamer] Application resumed from standby");
+                if (networkManager != null)
+                {
+                    networkManager.HandleStandbyExit();
+                }
+            }
+        }
+        
+        /// <summary>
         /// Clean up on application exit
         /// </summary>
         void OnApplicationQuit()

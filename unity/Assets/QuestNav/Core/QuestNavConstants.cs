@@ -10,18 +10,15 @@
         public const float FIELD_WIDTH = 8.02f;    // FRC field width in meters (Y-axis)
     
         // Network related constants
-        public const float DATA_TIMEOUT = 5.0f;     // 5 seconds without data = stale connection
         public const float RECONNECT_DELAY = 0.25f; // Delay between reconnection attempts
         public const int SERVER_PORT = 5810;        // NetworkTables server port
         
         // Heartbeat constants
         public const bool REQUIRE_HEARTBEAT = true;  // Set to false to disable heartbeat checks
         public const float HEARTBEAT_REQUEST_INTERVAL = 0.2f;  // 200ms between heartbeat requests
-        public const float HEARTBEAT_RESPONSE_TIMEOUT = 1.0f;  // 1 second to respond = degraded
-        public const float HEARTBEAT_DISCONNECT_TIMEOUT = 3.0f; // 3 seconds without response = disconnected
     
         // Application identity
-        public const string APP_NAME = "Quest3S";
+        public const string APP_NAME = "QuestNav";
         public const string DEFAULT_TEAM = "5152";
     
         // Server address formats

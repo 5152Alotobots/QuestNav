@@ -39,8 +39,11 @@ namespace QuestNav.Network.NetworkTables_CSharp
         private long? _serverTimeOffsetUs;
         private long _networkLatencyUs;
 
-        // Track connection state without using Time.time
+        // Track connection state
         private bool _connectionActive = false;
+        private int _messageCounter = 0;
+        private int _pingCounter = 0;
+        private const int MAX_PING_WITHOUT_RESPONSE = 3;
 
         private readonly Dictionary<int, Nt4Subscription> _subscriptions = new Dictionary<int, Nt4Subscription>();
         private readonly Dictionary<string, Nt4Topic> _publishedTopics = new Dictionary<string, Nt4Topic>();
@@ -64,6 +67,8 @@ namespace QuestNav.Network.NetworkTables_CSharp
             _onNewTopicData = onNewTopicData;
             _onOpen = onOpen;
             _connectionActive = false;
+            _messageCounter = 0;
+            _pingCounter = 0;
         }
 
         /// <summary>
@@ -73,25 +78,37 @@ namespace QuestNav.Network.NetworkTables_CSharp
         {
             try
             {
-                // Check if already connected or connecting
-                if (_ws != null && (_ws.ReadyState == WebSocketState.Open || _ws.ReadyState == WebSocketState.Connecting))
-                {
-                    return (true, null); // Already connected or connecting
-                }
-
                 // Clean up any existing connection first
                 if (_ws != null)
                 {
                     try
                     {
-                        _ws.Close();
+                        // Disconnect and clean up previous connection
+                        if (_ws.ReadyState == WebSocketState.Open || _ws.ReadyState == WebSocketState.Connecting)
+                        {
+                            _ws.Close();
+                        }
+                        
+                        // Ensure event handlers are removed to prevent memory leaks
+                        _ws.OnOpen -= OnOpen;
+                        _ws.OnMessage -= OnMessage;
+                        _ws.OnError -= OnError;
+                        _ws.OnClose -= OnClose;
+                        
                         _ws = null;
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"[NT4] Error closing existing WebSocket: {ex.Message}");
+                        Debug.LogWarning($"[NT4] Error cleaning up existing WebSocket: {ex.Message}");
                     }
                 }
+
+                // Reset connection state
+                _connectionActive = false;
+                _messageCounter = 0;
+                _pingCounter = 0;
+                _serverTopics.Clear();
+                _publishedTopics.Clear();
 
                 // Create a new connection
                 _ws = new WebSocket(_serverAddress);
@@ -124,6 +141,13 @@ namespace QuestNav.Network.NetworkTables_CSharp
                     {
                         _ws.Close();
                     }
+                    
+                    // Ensure event handlers are removed
+                    _ws.OnOpen -= OnOpen;
+                    _ws.OnMessage -= OnMessage;
+                    _ws.OnError -= OnError;
+                    _ws.OnClose -= OnClose;
+                    
                     _ws = null;
                 }
                 catch (Exception ex)
@@ -131,7 +155,51 @@ namespace QuestNav.Network.NetworkTables_CSharp
                     Debug.LogWarning($"[NT4] Error during disconnect: {ex.Message}");
                 }
             }
+            
+            // Clear topics and subscriptions
+            _publishedTopics.Clear();
+            _subscriptions.Clear();
+            _serverTopics.Clear();
+            
             _connectionActive = false;
+            _messageCounter = 0;
+            _pingCounter = 0;
+        }
+        
+        /// <summary>
+        /// Validate if the connection is still active by sending a timestamp ping
+        /// </summary>
+        /// <returns>True if the connection appears valid</returns>
+        public bool ValidateConnection()
+        {
+            // Basic connection check
+            if (_ws == null || _ws.ReadyState != WebSocketState.Open)
+            {
+                return false;
+            }
+            
+            // Send a timestamp to verify connection
+            try
+            {
+                WsSendTimestamp();
+                _pingCounter++;
+                
+                // If we've sent several pings without receiving any messages, connection is stale
+                if (_pingCounter > MAX_PING_WITHOUT_RESPONSE)
+                {
+                    Debug.LogWarning("[NT4] Connection appears stale - no responses to pings");
+                    _connectionActive = false;
+                    return false;
+                }
+                
+                return _connectionActive;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[NT4] Connection validation failed: {ex.Message}");
+                _connectionActive = false;
+                return false;
+            }
         }
         
         // Event handlers
@@ -139,6 +207,8 @@ namespace QuestNav.Network.NetworkTables_CSharp
         {
             Debug.Log("[NT4] Connected with identity " + _appName);
             _connectionActive = true;
+            _messageCounter = 0;
+            _pingCounter = 0;
             WsSendTimestamp();
             
             // Call the user-provided event handler
@@ -149,6 +219,8 @@ namespace QuestNav.Network.NetworkTables_CSharp
         {
             // Update connection status whenever we receive a message
             _connectionActive = true;
+            _messageCounter++;
+            _pingCounter = 0; // Reset ping counter as we got a message
 
             if (args.Data != null)
             {

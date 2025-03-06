@@ -25,10 +25,13 @@ namespace QuestNav.Network
         private bool useAddress = true;
         private string ipAddress = "";
         
-        // Heartbeat tracking - now only tracked on main thread
+        // Heartbeat tracking
         private float heartbeatTimer = 0f;
         private double lastHeartbeatRequestId = 0;
         private double lastReceivedResponseId = 0;
+        
+        // Standby recovery tracking
+        private bool isRecoveringFromStandby = false;
         
         /// <summary>
         /// Connection status enum defining possible connection states
@@ -201,6 +204,14 @@ namespace QuestNav.Network
                 {
                     UpdateConnectionStatus(ConnectionStatus.Connecting);
                 }
+                // If we are recovering from standby, be more aggressive with reconnection
+                else if (isRecoveringFromStandby && lastReceivedResponseId == 0 && lastHeartbeatRequestId >= 2)
+                {
+                    Debug.Log("[QuestNetworkManager] No heartbeat responses after standby. Forcing reconnection...");
+                    isRecoveringFromStandby = false;  // Reset recovery flag
+                    HandleDisconnectedState();
+                    return false;
+                }
                 // If we've sent several heartbeats but received no responses, consider the connection degraded
                 else if (lastReceivedResponseId == 0 && lastHeartbeatRequestId >= 5 && lastHeartbeatRequestId < 15)
                 {
@@ -225,6 +236,55 @@ namespace QuestNav.Network
         public void UpdateReceiveTime()
         {
             // No longer using time-based monitoring, this is a no-op now
+        }
+        
+        /// <summary>
+        /// Called when the app is going into standby mode
+        /// </summary>
+        public void HandleStandbyEnter()
+        {
+            Debug.Log("[QuestNetworkManager] Preparing for standby mode");
+            // Mark that heartbeat monitoring needs to be reset on resume
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+        }
+
+        /// <summary>
+        /// Called when the app is resuming from standby mode
+        /// </summary>
+        public void HandleStandbyExit()
+        {
+            Debug.Log("[QuestNetworkManager] Recovering from standby mode");
+            
+            // Mark that we're in recovery mode
+            isRecoveringFromStandby = true;
+            
+            // Reset heartbeat tracking to force immediate check
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+            heartbeatTimer = QuestNavConstants.HEARTBEAT_REQUEST_INTERVAL; // Force immediate heartbeat
+            
+            // Flag connection as potentially stale
+            UpdateConnectionStatus(ConnectionStatus.Degraded);
+            
+            // Force WebSocket state check - helps detect stale connections faster
+            if (frcDataSink != null && frcDataSink.Client != null)
+            {
+                if (!frcDataSink.Client.Connected())
+                {
+                    Debug.Log("[QuestNetworkManager] WebSocket connection stale after standby, reconnecting immediately");
+                    HandleDisconnectedState();
+                }
+                else
+                {
+                    // Test the connection is truly alive with a ping
+                    if (!frcDataSink.Client.ValidateConnection())
+                    {
+                        Debug.Log("[QuestNetworkManager] WebSocket connection validation failed after standby, reconnecting");
+                        HandleDisconnectedState();
+                    }
+                }
+            }
         }
     
         /// <summary>
@@ -321,6 +381,9 @@ namespace QuestNav.Network
                         // Force garbage collection to clean up socket resources
                         System.GC.Collect();
                         System.GC.WaitForPendingFinalizers();
+                        
+                        // Wait a small amount to allow system resources to be freed
+                        System.Threading.Thread.Sleep(50);
                     }
                     catch (Exception ex)
                     {
@@ -352,6 +415,12 @@ namespace QuestNav.Network
                 ConnectToRobot();
             
                 reconnectTimer = 0f;
+                
+                // If we've tried too many times, slow down to avoid overwhelming the network
+                if (reconnectAttempts > 10 && !isRecoveringFromStandby) 
+                {
+                    reconnectTimer = -1.0f;  // Add a longer delay
+                }
             }
         }
 
@@ -401,6 +470,30 @@ namespace QuestNav.Network
                 Debug.LogError($"[QuestNetworkManager] Error publishing topics: {ex.Message}");
                 topicsPublished = false;
             }
+        }
+        
+        /// <summary>
+        /// Forces a reconnection attempt regardless of current state
+        /// </summary>
+        public void ForceReconnect()
+        {
+            Debug.Log("[QuestNetworkManager] Forcing reconnection...");
+            
+            // Disconnect and clean up resources
+            Disconnect();
+            
+            // Reset connection state
+            isReconnecting = false;
+            topicsPublished = false;
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+            
+            // Immediate reconnection attempt
+            reconnectTimer = QuestNavConstants.RECONNECT_DELAY;
+            reconnectAttempts = 0;
+            
+            // Trigger reconnection process
+            HandleDisconnectedState();
         }
     
         /// <summary>
