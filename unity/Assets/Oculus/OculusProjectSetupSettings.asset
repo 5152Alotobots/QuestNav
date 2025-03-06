@@ -15,7 +15,8 @@ MonoBehaviour:
   boolProperties:
     keys:
     - OVRProjectSetup.OVRProjectSetup.OVRConfigurationTask.db3015e9c6512f876f805e2f980c23f5.Ignored.WebGL
-    values: 01
+    - OVRProjectSetup.OVRProjectSetup.OVRConfigurationTask.e8e6b3d92777e2e3ae48d4431a8ec9c1.Ignored.Android
+    values: 0101
   intProperties:
     keys: []
     values: 

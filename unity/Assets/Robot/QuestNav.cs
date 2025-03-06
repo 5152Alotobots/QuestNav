@@ -6,6 +6,10 @@ using System.Net.Sockets;
 using TMPro;
 using UnityEngine.UI;
 using System;
+using System.Collections.Generic;
+using System.Collections;
+using System.Text;
+using System.Threading.Tasks;
 
 /// <summary>
 /// Extension methods for Unity's Vector3 class to convert to array format.
@@ -43,7 +47,7 @@ public static class QuaternionExtensions
 /// Manages streaming of VR motion data to a FRC robot through NetworkTables.
 /// Handles pose tracking, reset operations, and network communication.
 /// </summary>
-public class MotionStreamer : MonoBehaviour
+public class QuestNav : MonoBehaviour
 {
     #region Fields
     /// <summary>
@@ -96,6 +100,11 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     public TMP_InputField teamInput;
 
+    // <summary>
+    /// IP address text
+    /// </summary>
+    public TMP_Text ipAddressText;
+
     /// <summary>
     /// Button to update team number
     /// </summary>
@@ -104,7 +113,7 @@ public class MotionStreamer : MonoBehaviour
     /// <summary>
     /// Default team number text
     /// </summary>
-    public static string inputText = "5152";
+    public static string inputText = "9999";
 
     /// <summary>
     /// Current team number
@@ -138,7 +147,7 @@ public class MotionStreamer : MonoBehaviour
     /// <summary>
     /// Application name for NetworkTables connection
     /// </summary>
-    private readonly string appName = "Quest3S";
+    private readonly string appName = "QuestNav";
 
     /// <summary>
     /// Server address format for NetworkTables connection
@@ -146,19 +155,9 @@ public class MotionStreamer : MonoBehaviour
     private readonly string serverAddress = "10.TE.AM.2";
 
     /// <summary>
-    /// DNS format for roboRIO connection
-    /// </summary>
-    private readonly string serverDNS = "roboRIO-####-FRC.local";
-
-    /// <summary>
     /// Current IP address for connection
     /// </summary>
     private string ipAddress = "";
-
-    /// <summary>
-    /// Flag to toggle between IP and DNS connection methods
-    /// </summary>
-    private bool useAddress = true;
 
     /// <summary>
     /// NetworkTables server port
@@ -169,7 +168,53 @@ public class MotionStreamer : MonoBehaviour
     /// Counter for connection retry delay
     /// </summary>
     private int delayCounter = 0;
-    #endregion
+
+    /// <summary>
+    /// Quest display frequency (in Hz)
+    /// </summary>
+    private float displayFrequency = 120.0f;
+
+    /// <summary>
+    /// Holds the detected local IP address of the HMD
+    /// </summary>
+    private string myAddressLocal = "0.0.0.0";
+
+    /// <summary>
+    /// Default reconnect delay for failed connection attempts
+    /// </summary>
+    private float defaultReconnectDelay = 3.0f; //seconds
+
+    /// <summary>
+    /// Reconnection delay variable for delaying failed connection attempts.
+    /// This value changes dynamically based on the number of failed attempts.
+    /// </summary>
+    private float reconnectDelay = 3.0f; //seconds
+
+    /// <summary>
+    /// Maximum reconnection delay (rate limited to prevent excessive retries lagging the main Unity thread)
+    /// </summary>
+    private const float maxReconnectDelay = 10.0f; //seconds
+
+    /// <summary>
+    /// List of failed connection attempt candidates (prevents excessive retries on failed addresses)
+    /// </summary>
+    private Dictionary<string, float> failedCandidates = new Dictionary<string, float>();
+
+    /// <summary>
+    /// Unreachable network delay
+    /// </summary>
+    private int unreachableNetworkDelay = 5; // seconds
+
+    /// <summary>
+    /// Cooldown before trying candidates that have failed previously
+    /// </summary>
+    private const float candidateFailureCooldown = 10.0f; // seconds
+
+    /// <summary>
+    /// Coroutine definition to enable controlling the connection process
+    /// </summary>
+    private Coroutine _connectionCoroutine;
+
     #endregion
 
     #region Unity Lifecycle Methods
@@ -178,10 +223,11 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     void Start()
     {
-        OVRPlugin.systemDisplayFrequency = 120.0f;
-        teamNumber = PlayerPrefs.GetString("TeamNumber", "5152");
+        OVRPlugin.systemDisplayFrequency = displayFrequency;
+        teamNumber = PlayerPrefs.GetString("TeamNumber", "9999");
         setInputBox(teamNumber);
         teamInput.Select();
+        UpdateIPAddressText();
         ConnectToRobot();
         teamUpdateButton.onClick.AddListener(UpdateTeamNumber);
         teamInput.onSelect.AddListener(OnInputFieldSelected);
@@ -192,57 +238,168 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     void LateUpdate()
     {
+        // If the connection isn’t ready, skip the update.
+        if (frcDataSink == null || !frcDataSink.Client.Connected())
+        {
+            return;
+        }
+
         if (frcDataSink.Client.Connected())
         {
             PublishFrameData();
-
-            if (delayCounter >= 0)
-            {
-                ProcessCommands();
-                delayCounter = 0;
-            }
-            else
-            {
-                delayCounter++;
-            }
+            ProcessCommands();
         }
         else
         {
             HandleDisconnectedState();
         }
+
+        // Only execute these functions once per second
+        if (delayCounter >= (int)displayFrequency)
+        {
+            UpdateIPAddressText();
+            delayCounter = 0;
+        }
+        else
+        {
+            delayCounter++;
+        }
     }
+    #endregion
     #endregion
 
     #region Network Connection Methods
     /// <summary>
-    /// Establishes connection to the robot using either IP or DNS
+    /// Called to start the connection process.
     /// </summary>
     private void ConnectToRobot()
     {
-        if (useAddress == true)
+        StartCoroutine(ConnectionCoroutineWrapper());
+    }
+
+    /// <summary>
+    /// A coroutine wrapper that waits until the asynchronous connection method completes.
+    /// This wrapper enables setting timeout guardbands for the connection process.
+    /// </summary>
+    private IEnumerator ConnectionCoroutineWrapper()
+    {
+        var connectionTask = AttemptConnectionAsync();
+        while (!connectionTask.IsCompleted)
         {
-            ipAddress = getIP();
-            useAddress = false;
+            yield return null;
         }
-        else
+    }
+
+    /// <summary>
+    /// Asynchronously attempts to connect to one of the candidate addresses.
+    /// Uses async DNS resolution and wraps blocking calls in Task.Run to avoid blocking the main Unity thread.
+    /// </summary>
+    private async Task AttemptConnectionAsync()
+    {
+        bool connectionEstablished = false;
+        List<string> candidateAddresses = new List<string>()
         {
-            try
+            generateIP(),
+            "172.22.11.2",
+            $"roboRIO-{teamNumber}-FRC.local",
+            $"roboRIO-{teamNumber}-FRC.lan",
+            $"roboRIO-{teamNumber}-FRC.frc-field.local"
+        };
+
+        while (!connectionEstablished)
+        {
+            // Check if the network is reachable.
+            if (Application.internetReachability == NetworkReachability.NotReachable)
             {
-                IPHostEntry hostEntry = Dns.GetHostEntry(getDNS());
-                IPAddress[] ipv4Addresses = hostEntry.AddressList
-                   .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                   .ToArray();
-                ipAddress = ipv4Addresses[0].ToString();
-            }
-            catch (Exception ex)
-            {
-                Debug.Log($"Error resolving DNS name: {ex.Message}");
+                QueuedLogger.LogWarning($"[QuestNav] Network not reachable. Waiting {unreachableNetworkDelay} seconds before reattempting.");
+                await Task.Delay(unreachableNetworkDelay);
+                continue;
             }
 
-            useAddress = true;
+            StringBuilder cycleLog = new StringBuilder();
+            cycleLog.AppendLine("[QuestNav] Connection attempt cycle:");
+
+            foreach (string candidate in candidateAddresses)
+            {
+                // Skip a candidate if it failed recently.
+                if (failedCandidates.ContainsKey(candidate) && (Time.time - failedCandidates[candidate] < candidateFailureCooldown))
+                {
+                    cycleLog.AppendLine($"Skipping candidate {candidate} (failed less than {candidateFailureCooldown} seconds ago).");
+                    continue;
+                }
+                else
+                {
+                    failedCandidates.Remove(candidate);
+                }
+
+                string resolvedAddress = candidate;
+                try
+                {
+                    // Use asynchronous DNS resolution.
+                    IPHostEntry hostEntry = await Dns.GetHostEntryAsync(candidate);
+                    IPAddress[] ipv4Addresses = hostEntry.AddressList
+                        .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                        .ToArray();
+                    if (ipv4Addresses.Length > 0)
+                    {
+                        resolvedAddress = ipv4Addresses[0].ToString();
+                    }
+                    else
+                    {
+                        cycleLog.AppendLine($"DNS lookup returned no IPv4 for candidate '{candidate}'.");
+                        failedCandidates[candidate] = Time.time;
+                        continue;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    cycleLog.AppendLine($"DNS resolution failed for candidate '{candidate}': {ex.Message}");
+                    failedCandidates[candidate] = Time.time;
+                    continue;
+                }
+
+                cycleLog.AppendLine($"Attempting connection to {resolvedAddress}...");
+
+                try
+                {
+                    // Wrap the potentially blocking connection call in Task.Run.
+                    var sink = await Task.Run(() =>
+                    {
+                        return new Nt4Source(appName, resolvedAddress, serverPort);
+                    });
+
+                    if (sink.Client.Connected())
+                    {
+                        ipAddress = resolvedAddress; // Cache the working address.
+                        frcDataSink = sink;
+                        cycleLog.AppendLine($"Connected successfully to {resolvedAddress}.");
+                        connectionEstablished = true;
+                        break;
+                    }
+                    else
+                    {
+                        cycleLog.AppendLine($"Connection attempt to {resolvedAddress} did not succeed.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    cycleLog.AppendLine($"Connection attempt failed for {resolvedAddress}: {ex.Message}");
+                }
+            }
+
+            // Handle a failed connection
+            if (!connectionEstablished)
+            {
+                cycleLog.AppendLine($"Could not establish a connection with any candidate addresses. Reattempting in {reconnectDelay} second(s)...");
+                QueuedLogger.Log(cycleLog.ToString(), QueuedLogger.LogLevel.Warning);
+                await Task.Delay((int)(reconnectDelay * 1000));
+                reconnectDelay = Mathf.Min(reconnectDelay * 2, maxReconnectDelay);
+            }
         }
-        Debug.Log("[MotionStreamer] Attempting to connect to the RoboRIO at " + ipAddress + ".");
-        frcDataSink = new Nt4Source(appName, ipAddress, serverPort);
+
+        // Reset delay on success.
+        reconnectDelay = defaultReconnectDelay;
+        QueuedLogger.Log("[QuestNav] Connection established. Publishing topics.");
         PublishTopics();
     }
 
@@ -251,7 +408,7 @@ public class MotionStreamer : MonoBehaviour
     /// </summary>
     private void HandleDisconnectedState()
     {
-        Debug.Log("[MotionStreamer] Robot disconnected. Resetting connection and attempting to reconnect...");
+        QueuedLogger.Log("[QuestNav] Robot disconnected. Resetting connection and attempting to reconnect...");
         frcDataSink.Client.Disconnect();
         ConnectToRobot();
     }
@@ -308,7 +465,7 @@ public class MotionStreamer : MonoBehaviour
         if (resetInProgress && command == 0)
         {
             resetInProgress = false;
-            Debug.Log("[MotionStreamer] Reset operation completed");
+            QueuedLogger.Log("[QuestNav] Reset operation completed");
             return;
         }
 
@@ -317,7 +474,7 @@ public class MotionStreamer : MonoBehaviour
             case 1:
                 if (!resetInProgress)
                 {
-                    Debug.Log("[MotionStreamer] Received heading reset request, initiating recenter...");
+                    QueuedLogger.Log("[QuestNav] Received heading reset request, initiating recenter...");
                     RecenterPlayer();
                     resetInProgress = true;
                 }
@@ -325,14 +482,14 @@ public class MotionStreamer : MonoBehaviour
             case 2:
                 if (!resetInProgress)
                 {
-                    Debug.Log("[MotionStreamer] Received pose reset request, initiating reset...");
+                    QueuedLogger.Log("[QuestNav] Received pose reset request, initiating reset...");
                     InitiatePoseReset();
-                    Debug.Log("[MotionStreamer] Processing pose reset request.");
+                    QueuedLogger.Log("[QuestNav] Processing pose reset request.");
                     resetInProgress = true;
                 }
                 break;
             case 3:
-                Debug.Log("[MotionStreamer] Ping received, responding...");
+                QueuedLogger.Log("[QuestNav] Ping received, responding...");
                 frcDataSink.PublishValue("/questnav/miso", 97);  // 97 for ping response
                 break;
             default:
@@ -367,10 +524,10 @@ public class MotionStreamer : MonoBehaviour
                 // Add delay between retries to allow for network latency
                 if (i > 0) {
                     System.Threading.Thread.Sleep((int)retryDelayMs);
-                    Debug.Log($"[MotionStreamer] Attempt {attemptCount} of {maxRetries}...");
+                    QueuedLogger.Log($"[QuestNav] Attempt {attemptCount} of {maxRetries}...");
                 }
 
-                Debug.Log($"[MotionStreamer] Reading NetworkTables Values (Attempt {attemptCount}):");
+                QueuedLogger.Log($"[QuestNav] Reading NetworkTables Values (Attempt {attemptCount}):");
 
                 // Read the pose array from NetworkTables
                 // Format: [X, Y, Rotation] in FRC field coordinates
@@ -381,19 +538,19 @@ public class MotionStreamer : MonoBehaviour
                     // Check if pose is within valid field boundaries
                     if (resetPose[0] < 0 || resetPose[0] > FIELD_LENGTH ||
                         resetPose[1] < 0 || resetPose[1] > FIELD_WIDTH) {
-                        Debug.LogWarning($"[MotionStreamer] Reset pose outside field boundaries: X:{resetPose[0]:F3} Y:{resetPose[1]:F3}");
+                        QueuedLogger.LogWarning($"[QuestNav] Reset pose outside field boundaries: X:{resetPose[0]:F3} Y:{resetPose[1]:F3}");
                         continue;
                     }
                     success = true;
-                    Debug.Log($"[MotionStreamer] Successfully read reset pose values on attempt {attemptCount}");
+                    QueuedLogger.Log($"[QuestNav] Successfully read reset pose values on attempt {attemptCount}");
                 }
 
-                Debug.Log($"[MotionStreamer] Values (Attempt {attemptCount}): X:{resetPose?[0]:F3} Y:{resetPose?[1]:F3} Rot:{resetPose?[2]:F3}");
+                QueuedLogger.Log($"[QuestNav] Values (Attempt {attemptCount}): X:{resetPose?[0]:F3} Y:{resetPose?[1]:F3} Rot:{resetPose?[2]:F3}");
             }
 
             // Exit if we couldn't get valid pose data
             if (!success) {
-                Debug.LogWarning($"[MotionStreamer] Failed to read valid reset pose values after {attemptCount} attempts");
+                QueuedLogger.LogWarning($"[QuestNav] Failed to read valid reset pose values after {attemptCount} attempts");
                 return;
             }
 
@@ -406,15 +563,20 @@ public class MotionStreamer : MonoBehaviour
             while (resetRotation > 180) resetRotation -= 360;
             while (resetRotation < -180) resetRotation += 360;
 
-            Debug.Log($"[MotionStreamer] Starting pose reset - Target: FRC X:{resetX:F2} Y:{resetY:F2} Rot:{resetRotation:F2}°");
+            QueuedLogger.Log($"[QuestNav] Starting pose reset - Target: FRC X:{resetX:F2} Y:{resetY:F2} Rot:{resetRotation:F2}°");
 
             // Store current VR camera state for reference
             Vector3 currentCameraPos = vrCamera.position;
             Quaternion currentCameraRot = vrCamera.rotation;
 
-            Debug.Log($"[MotionStreamer] Before reset - Camera Pos:{currentCameraPos:F3} Rot:{currentCameraRot.eulerAngles:F3}");
+            QueuedLogger.Log($"[QuestNav] Before reset - Camera Pos:{currentCameraPos:F3} Rot:{currentCameraRot.eulerAngles:F3}");
 
             // Convert FRC coordinates to Unity coordinates:
+            // Unity uses a left-handed coordinate system with Y as the vertical axis (aligned with gravity)
+            // FRC uses a right-handed coordinate system with Z as the vertical axis (aligned with gravity)
+            // See this page for more Unity details: https://docs.unity3d.com/Manual/QuaternionAndEulerRotationsInUnity.html
+            // See this page for more FRC details: https://docs.wpilib.org/en/stable/docs/software/basic-programming/coordinate-system.html
+
             // - Unity X = -FRC Y (right is positive in Unity)
             // - Unity Y = kept unchanged (height)
             // - Unity Z = FRC X (forward is positive in both)
@@ -442,8 +604,8 @@ public class MotionStreamer : MonoBehaviour
             if (yawDelta > 180) yawDelta -= 360;
             if (yawDelta < -180) yawDelta += 360;
 
-            Debug.Log($"[MotionStreamer] Calculated adjustments - Position delta:{positionDelta:F3} Rotation delta:{yawDelta:F3}°");
-            Debug.Log($"[MotionStreamer] Target Unity Position: {targetUnityPosition:F3}");
+            QueuedLogger.Log($"[QuestNav] Calculated adjustments - Position delta:{positionDelta:F3} Rotation delta:{yawDelta:F3}°");
+            QueuedLogger.Log($"[QuestNav] Target Unity Position: {targetUnityPosition:F3}");
 
             // Store the original offset between camera and its root
             // This helps maintain proper VR tracking space
@@ -457,22 +619,22 @@ public class MotionStreamer : MonoBehaviour
             vrCameraRoot.position += positionDelta;
 
             // Log final position and rotation for verification
-            Debug.Log($"[MotionStreamer] After reset - Camera Pos:{vrCamera.position:F3} Rot:{vrCamera.rotation.eulerAngles:F3}");
+            QueuedLogger.Log($"[QuestNav] After reset - Camera Pos:{vrCamera.position:F3} Rot:{vrCamera.rotation.eulerAngles:F3}");
 
             // Calculate and check position error to ensure accuracy
             float posError = Vector3.Distance(vrCamera.position, targetUnityPosition);
-            Debug.Log($"[MotionStreamer] Position error after reset: {posError:F3}m");
+            QueuedLogger.Log($"[QuestNav] Position error after reset: {posError:F3}m");
 
             // Warn if position error is larger than expected threshold
             if (posError > 0.01f) {  // 1cm threshold
-                Debug.LogWarning($"[MotionStreamer] Large position error detected!");
+                QueuedLogger.LogWarning($"[QuestNav] Large position error detected!");
             }
 
             frcDataSink.PublishValue("/questnav/miso", 98);
         }
         catch (Exception e) {
-            Debug.LogError($"[MotionStreamer] Error during pose reset: {e.Message}");
-            Debug.LogException(e);
+            QueuedLogger.LogError($"[QuestNav] Error during pose reset: {e.Message}");
+            QueuedLogger.LogException(e);
             frcDataSink.PublishValue("/questnav/miso", 0);
             resetInProgress = false;
         }
@@ -495,8 +657,8 @@ public class MotionStreamer : MonoBehaviour
             frcDataSink.PublishValue("/questnav/miso", 99);
         }
         catch (Exception e) {
-            Debug.LogError($"[MotionStreamer] Error during pose reset: {e.Message}");
-            Debug.LogException(e);
+            QueuedLogger.LogError($"[QuestNav] Error during pose reset: {e.Message}");
+            QueuedLogger.LogException(e);
             frcDataSink.PublishValue("/questnav/miso", 0);
             resetInProgress = false;
         }
@@ -505,20 +667,70 @@ public class MotionStreamer : MonoBehaviour
 
     #region UI Methods
     /// <summary>
-    /// Updates the team number based on user input and triggers a connection reset
+    /// Updates the team number based on user input and triggers an asynchronous connection reset.
     /// </summary>
     public void UpdateTeamNumber()
     {
-        Debug.Log("[MotionStreamer] Updating Team Number");
+        QueuedLogger.Log("[QuestNav] Updating Team Number");
         teamNumber = teamInput.text;
         PlayerPrefs.SetString("TeamNumber", teamNumber);
         PlayerPrefs.Save();
         setInputBox(teamNumber);
-        HandleDisconnectedState();
+
+        // Clear cached IP and candidate failure data.
+        ipAddress = "";
+        failedCandidates.Clear();
+
+        // If a connection coroutine is already running, stop it.
+        if (_connectionCoroutine != null)
+        {
+            StopCoroutine(_connectionCoroutine);
+            _connectionCoroutine = null;
+        }
+
+        // Disconnect existing connection, if any.
+        if (frcDataSink != null)
+        {
+            if (frcDataSink.Client.Connected())
+            {
+                frcDataSink.Client.Disconnect();
+            }
+            frcDataSink = null;
+        }
+
+        // Restart the asynchronous connection process.
+        _connectionCoroutine = StartCoroutine(ConnectionCoroutineWrapper());
     }
 
     /// <summary>
-    /// Sets the input box placeholder text with the current team number
+    /// Updates the default IP address shown in the UI with the current HMD IP address
+    /// </summary>
+    /// 
+    public void UpdateIPAddressText()
+    {
+        //Get the local IP
+        IPHostEntry hostEntry = Dns.GetHostEntry(Dns.GetHostName());
+        foreach (IPAddress ip in hostEntry.AddressList)
+        {
+            if (ip.AddressFamily == AddressFamily.InterNetwork)
+            {
+                myAddressLocal = ip.ToString();
+                TextMeshProUGUI ipText = ipAddressText as TextMeshProUGUI;
+                if (myAddressLocal == "127.0.0.1")
+                {
+                    ipText.text = "No Adapter Found";
+                }
+                else
+                {
+                    ipText.text = myAddressLocal;
+                }
+            }
+            break;
+        }
+    }
+
+    /// <summary>
+    /// Updates the input box placeholder text with the current team number
     /// </summary>
     /// <param name="team">The team number to display</param>
     private void setInputBox(string team)
@@ -531,30 +743,28 @@ public class MotionStreamer : MonoBehaviour
         }
         else
         {
-            Debug.LogError("Placeholder is not assigned or not a TextMeshProUGUI component.");
+            QueuedLogger.LogError("Placeholder is not assigned or not a TextMeshProUGUI component.");
         }
     }
     #endregion
 
     #region Helper Methods
     /// <summary>
-    /// Generates the DNS address for the roboRIO based on team number
-    /// </summary>
-    /// <returns>The formatted DNS address string</returns>
-    private string getDNS()
-    {
-        return serverDNS.Replace("####", teamNumber);
-    }
-
-    /// <summary>
     /// Generates the IP address for the roboRIO based on team number
     /// </summary>
     /// <returns>The formatted IP address string</returns>
-    private string getIP()
+    private string generateIP()
     {
-        string tePart = teamNumber.Length > 2 ? teamNumber.Substring(0, teamNumber.Length - 2) : "0";
-        string amPart = teamNumber.Length > 2 ? teamNumber.Substring(teamNumber.Length - 2) : teamNumber;
-        return serverAddress.Replace("TE", tePart).Replace("AM", amPart);
+        if (teamNumber.Length >= 1)
+        {
+            string tePart = teamNumber.Length > 2 ? teamNumber.Substring(0, teamNumber.Length - 2) : "0";
+            string amPart = teamNumber.Length > 2 ? teamNumber.Substring(teamNumber.Length - 2) : teamNumber;
+            return serverAddress.Replace("TE", tePart).Replace("AM", amPart);
+        }
+        else
+        {
+            return "10.0.0.2";
+        }
     }
 
     /// <summary>
@@ -563,7 +773,7 @@ public class MotionStreamer : MonoBehaviour
     /// <param name="text">The current text in the input field</param>
     private void OnInputFieldSelected(string text)
     {
-        Debug.Log("[MotionStreamer] Input Selected");
+        QueuedLogger.Log("[QuestNav] Input Selected");
     }
     #endregion
 }

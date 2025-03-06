@@ -104,6 +104,29 @@ A high-level overview of the software architecture is shown below.
 
 ![QuestNav Software Block Diagram](docs/QuestNav-Example-Flow.png)
 
+# QuestNav Control Commands
+QuestNav implements a very simple transmit / receive structure that enables bidirectional communication between the VR headset and the robot. This is useful for commands such as resetting / initializing robot pose, updating the headset configuration, and future commands. The table below lists all of the commands and responses implemented to date. 
+
+## Robot -> QuestNav
+This table lists the commands currently supported by QuestNav.
+
+| mosi | Description |
+|:--------:|:---------|
+|    0	   | Idle |
+|    1     | Heading reset request |
+|    2     | Pose reset request |
+|    3     | Ping request |
+
+## QuestNav -> Robot
+This table lists the responses currently supported by QuestNav. 
+
+| miso | Description |
+|:--------:|:---------|
+|    99	   | Heading zeroed successfully (similar to long-pressing the Oculus logo) |
+|    98    | Pose initialized successfully |
+|    97    | Ping request response |
+|    0     | Idle |
+
 # Testing QuestNav
 At it's heart, QuestNav is merely a VR app designed to push data to Network Tables. However, some one-time setup is required before we're able to push a custom app to a VR headset. 
 
@@ -122,24 +145,28 @@ At it's heart, QuestNav is merely a VR app designed to push data to Network Tabl
 	- Set the display timeout to 4 hours in `Settings > General > Power > Display off`
 	- Enable battery saver mode in `Settings > General > Power > Battery saver mode`
 	- Disable WiFi in `Settings > WiFi`
+		- Alternatively, WiFi can be disabled via adb using this command: `adb shell svc wifi disable`
 		- **NOTE:** Be sure to completely turn off WiFi, otherwise the headset will constantly disconnect from the robot network as it tries to look for the internet
 	- Disable Bluetooth in `Settings > Bluetooth`
+		- Alternatively, Bluetooth can be disabled via adb using this command: `adb shell svc bluetooth disable`
 		- **NOTE:** Disabling Bluetooth will break the companion app functionality
 	- Disable the guardian for development purposes `Settings > Advanced > Experimental Settings > Enable Custom Settings` and **TURN OFF** `Physical Space Features`, `MTP Notification`, and `Link Auto Connect`
 		- These settings might also be located in `Settings > Developer > Experimental Settings > Enable Custom Settings` on some older OS builds
+		- Alternatively, the Guardian can be disabled via adb using this command: `adb shell setprop debug.oculus.guardian_pause 1`, however the setting **does not persist** and must be sent after every boot. 
 4. Plug the headset into your PC and install the example .apk using MQDH or adb (`adb install QuestNav.apk`)
 	- **NOTE!** The example app team number is hard-coded to 9999
 
 ## Once-Per-Boot Setup
 These setup steps are required *once per boot*. This setup process can be prevented by ensuring your headset remains powered on using an external battery.
-1. Plug the USB-Ethernet adapter into the USB port on the Quest headset
-2. Start the QuestNav app using MQDH or by selecting the app icon in the launcher
-3. Check that the Quest headset has connected to your robot and is writing pose data
+1. Plug a 5V power source into the USB-Ethernet adapter
+2. Plug the USB-Ethernet adapter into the USB port on the Quest headset
+3. Start the QuestNav app using MQDH or by selecting the app icon in the launcher
+4. Check that the Quest headset shows a valid IP address, is connected to your robot, and is writing pose data
 
 # Unity Development Environment Setup
 ### Step 1: Install Unity
 - Download and install Unity Hub from the official website ([link](https://unity.com/download))
-- Open Unity Hub, sign in, and install Unity 6 (6000.0.25f1) LTS
+- Open Unity Hub, sign in, and install Unity 6 (6000.0.29f1) LTS
 	- Select the following:
 		- "Microsoft Visual Studio Community 2022"
 		- Android Build Support"
@@ -208,7 +235,16 @@ This package is required by the C# Network Tables library.
 - Cycle through the rest of the tabs at the top of the window and apply all the fixes
 - At a minimum, the Android tab should show a green ✅ and report its status as "XR Ready for Android"
 
-### Step 8: Build the project using the OVR build tool
+### Step 8: Build the project
+
+#### Building the project using Unity's build tool
+
+- Navigate to `File > Build Profiles`
+- If this is your first time building, select `Android` from the list of available platforms on the left and click `Switch Platform`
+- **VERY IMPORTANT: Be sure to ✅ `Development Build`** Otherwise, the app will crash at launch! 
+- Once Unity has finished recompiling assets, click `Build and Run`
+
+#### Building the project using OVR Build
 
 - The build tool is located in `Meta > OVR Build > OVR Build APK...`
 - **VERY IMPORTANT: Be sure to ✅ `Development Build?`** Otherwise, the app will crash at launch! 
@@ -277,7 +313,9 @@ A: Currently, there are two levels of "zeroing". There's the local "zero" that s
 
 ### Q: Can I reset the pose to some value?
 
-A: Pull requests adding this feature are always welcome!
+A: Yes! Thanks to @SeanErn for the pose resetting PR! 
+
+~~PRs are always welcome!~~
 
 ### Q: Can I push this around on the cart during camera calibration, or do I need to push with wheels on carpet or wait until a practice match?
 
