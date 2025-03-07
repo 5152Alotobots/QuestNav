@@ -113,12 +113,12 @@ public class QuestNav : MonoBehaviour
     /// <summary>
     /// Default team number text
     /// </summary>
-    public static string inputText = "9999";
+    public static string inputText = "5152";
 
     /// <summary>
     /// Current team number
     /// </summary>
-    private string teamNumber = "";
+    private string teamNumber = "5152";
 
     /// <summary>
     /// Reference to the VR camera transform
@@ -224,7 +224,7 @@ public class QuestNav : MonoBehaviour
     void Start()
     {
         OVRPlugin.systemDisplayFrequency = displayFrequency;
-        teamNumber = PlayerPrefs.GetString("TeamNumber", "9999");
+        teamNumber = PlayerPrefs.GetString("TeamNumber", "5152");
         setInputBox(teamNumber);
         teamInput.Select();
         UpdateIPAddressText();
@@ -299,11 +299,7 @@ public class QuestNav : MonoBehaviour
         bool connectionEstablished = false;
         List<string> candidateAddresses = new List<string>()
         {
-            generateIP(),
-            "172.22.11.2",
-            $"roboRIO-{teamNumber}-FRC.local",
-            $"roboRIO-{teamNumber}-FRC.lan",
-            $"roboRIO-{teamNumber}-FRC.frc-field.local"
+            "10.0.0.113"
         };
 
         while (!connectionEstablished)
