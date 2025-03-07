@@ -6,10 +6,9 @@
   <component name="ChangeListManager">
     <list default="true" id="6c48f596-4ef3-48f1-987c-2035047e180a" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/.idea.unity/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.unity/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/NuGet.config.meta" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/NuGet.config.meta" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavConstants.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavConstants.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavCore.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavCore.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTableManager.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTableManager.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Client.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Client.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Assets/Settings/UniversalRenderPipelineGlobalSettings.asset" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/Settings/UniversalRenderPipelineGlobalSettings.asset" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />

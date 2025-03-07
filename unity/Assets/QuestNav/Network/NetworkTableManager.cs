@@ -50,7 +50,89 @@ namespace QuestNav.Network
         /// Coroutine for connection management
         /// </summary>
         private Coroutine _connectionCoroutine;
+        
+        /// <summary>
+        /// Coroutine for heartbeat management
+        /// </summary>
+        private Coroutine _heartbeatCoroutine;
         #endregion
+        
+        #region Heartbeat System
+        /// <summary>
+        /// Heartbeat timer to track time since last heartbeat
+        /// </summary>
+        private float heartbeatTimer = 0f;
+        
+        /// <summary>
+        /// Last heartbeat request ID sent
+        /// </summary>
+        private double lastHeartbeatRequestId = 0;
+        
+        /// <summary>
+        /// Last heartbeat response ID received
+        /// </summary>
+        private double lastReceivedResponseId = 0;
+        
+        /// <summary>
+        /// Connection status enum defining possible connection states
+        /// </summary>
+        public enum ConnectionStatus
+        {
+            Disconnected = 0,
+            Connecting = 1,
+            Connected = 2,
+            Degraded = 3
+        }
+        
+        /// <summary>
+        /// Current connection status
+        /// </summary>
+        private ConnectionStatus currentStatus = ConnectionStatus.Disconnected;
+        
+        /// <summary>
+        /// Get current connection status
+        /// </summary>
+        public ConnectionStatus Status => currentStatus;
+        #endregion
+        
+        /// <summary>
+        /// Unity MonoBehaviour lifecycle - Awake
+        /// </summary>
+        private void Awake()
+        {
+            // Reset connection and heartbeat state
+            currentStatus = ConnectionStatus.Disconnected;
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+            heartbeatTimer = 0f;
+        }
+        
+        /// <summary>
+        /// Unity MonoBehaviour lifecycle - OnEnable
+        /// </summary>
+        private void OnEnable()
+        {
+            // Start heartbeat monitoring when component is enabled
+            if (_heartbeatCoroutine == null && QuestNavConstants.REQUIRE_HEARTBEAT)
+            {
+                QueuedLogger.Log("[NetworkTableManager] Starting heartbeat coroutine");
+                _heartbeatCoroutine = StartCoroutine(HeartbeatMonitoringCoroutine());
+            }
+        }
+        
+        /// <summary>
+        /// Unity MonoBehaviour lifecycle - OnDisable
+        /// </summary>
+        private void OnDisable()
+        {
+            // Stop heartbeat monitoring when component is disabled
+            if (_heartbeatCoroutine != null)
+            {
+                QueuedLogger.Log("[NetworkTableManager] Stopping heartbeat coroutine");
+                StopCoroutine(_heartbeatCoroutine);
+                _heartbeatCoroutine = null;
+            }
+        }
         
         /// <summary>
         /// Initialize the NetworkTables manager
@@ -58,6 +140,13 @@ namespace QuestNav.Network
         public void Initialize()
         {
             teamNumber = PlayerPrefs.GetString("TeamNumber", QuestNavConstants.DEFAULT_TEAM_NUMBER);
+            
+            // Reset heartbeat counters
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+            heartbeatTimer = 0f;
+            
+            // Connect to robot
             ConnectToRobot();
         }
         
@@ -86,8 +175,16 @@ namespace QuestNav.Network
             // Disconnect existing connection, if any
             Disconnect();
             
+            // Reset heartbeat tracking
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+            heartbeatTimer = 0f;
+            
             // Restart the asynchronous connection process
             _connectionCoroutine = StartCoroutine(ConnectionCoroutineWrapper());
+            
+            // Update connection status
+            UpdateConnectionStatus(ConnectionStatus.Disconnected);
         }
         
         /// <summary>
@@ -103,6 +200,9 @@ namespace QuestNav.Network
                 }
                 nt = null;
             }
+            
+            // Update connection status
+            UpdateConnectionStatus(ConnectionStatus.Disconnected);
         }
         
         /// <summary>
@@ -159,7 +259,14 @@ namespace QuestNav.Network
         {
             if (IsConnected())
             {
-                nt.PublishValue(topic, value);
+                try
+                {
+                    nt.PublishValue(topic, value);
+                }
+                catch (Exception ex)
+                {
+                    QueuedLogger.LogError($"[NetworkTableManager] Error publishing value to {topic}: {ex.Message}");
+                }
             }
         }
         
@@ -170,39 +277,47 @@ namespace QuestNav.Network
         {
             if (!IsConnected()) return default(T);
             
-            // Handle different types based on T
-            if (typeof(T) == typeof(long)) 
+            try
             {
-                return (T)(object)nt.GetLong(topic);
-            }
-            if (typeof(T) == typeof(double))
-            {
-                return (T)(object)nt.GetDouble(topic);
-            }
-            if (typeof(T) == typeof(double[]))
-            {
-                return (T)(object)nt.GetDoubleArray(topic);
-            }
-            if (typeof(T) == typeof(string))
-            {
-                return (T)(object)nt.GetString(topic);
-            }
-            if (typeof(T) == typeof(float[]))
-            {
-                // Convert double[] to float[]
-                double[] doubleArray = nt.GetDoubleArray(topic);
-                if (doubleArray == null) return default(T);
-                
-                float[] floatArray = new float[doubleArray.Length];
-                for (int i = 0; i < doubleArray.Length; i++)
+                // Handle different types based on T
+                if (typeof(T) == typeof(long)) 
                 {
-                    floatArray[i] = (float)doubleArray[i];
+                    return (T)(object)nt.GetLong(topic);
                 }
-                return (T)(object)floatArray;
+                if (typeof(T) == typeof(double))
+                {
+                    return (T)(object)nt.GetDouble(topic);
+                }
+                if (typeof(T) == typeof(double[]))
+                {
+                    return (T)(object)nt.GetDoubleArray(topic);
+                }
+                if (typeof(T) == typeof(string))
+                {
+                    return (T)(object)nt.GetString(topic);
+                }
+                if (typeof(T) == typeof(float[]))
+                {
+                    // Convert double[] to float[]
+                    double[] doubleArray = nt.GetDoubleArray(topic);
+                    if (doubleArray == null) return default(T);
+                    
+                    float[] floatArray = new float[doubleArray.Length];
+                    for (int i = 0; i < doubleArray.Length; i++)
+                    {
+                        floatArray[i] = (float)doubleArray[i];
+                    }
+                    return (T)(object)floatArray;
+                }
+                
+                QueuedLogger.LogWarning($"[NetworkTableManager] Unsupported type {typeof(T).Name} requested for topic {topic}");
+                return default(T);
             }
-            
-            QueuedLogger.LogWarning($"[NetworkTableManager] Unsupported type {typeof(T).Name} requested for topic {topic}");
-            return default(T);
+            catch (Exception ex)
+            {
+                QueuedLogger.LogError($"[NetworkTableManager] Error getting value from {topic}: {ex.Message}");
+                return default(T);
+            }
         }
         
         /// <summary>
@@ -222,12 +337,30 @@ namespace QuestNav.Network
             PublishTopic(QuestNavConstants.Topics.TELEMETRY_QUATERNION, "float[]");
             PublishTopic(QuestNavConstants.Topics.TELEMETRY_EULER_ANGLES, "float[]");
             PublishTopic(QuestNavConstants.Topics.TELEMETRY_BATTERY_PERCENT, "double");
+            PublishTopic(QuestNavConstants.Topics.CONNECTION_STATUS, "int");
+            
+            // Heartbeat topic only if required
+            if (QuestNavConstants.REQUIRE_HEARTBEAT)
+            {
+                PublishTopic(QuestNavConstants.Topics.HEARTBEAT_REQUEST, "double");
+                QueuedLogger.Log("[NetworkTableManager] Heartbeat request topic published");
+            }
             
             // Subscribe to command topics
             Subscribe(QuestNavConstants.Topics.COMMAND_MOSI, 0.1, false, false, false);
             Subscribe(QuestNavConstants.Topics.INIT_POSITION, 0.1, false, false, false);
             Subscribe(QuestNavConstants.Topics.INIT_EULER_ANGLES, 0.1, false, false, false);
             Subscribe(QuestNavConstants.Topics.COMMAND_RESETPOSE, 0.1, false, false, false);
+            
+            // Heartbeat response topic only if required
+            if (QuestNavConstants.REQUIRE_HEARTBEAT)
+            {
+                Subscribe(QuestNavConstants.Topics.HEARTBEAT_RESPONSE, 0.05, false, false, false);
+                QueuedLogger.Log("[NetworkTableManager] Subscribed to heartbeat response topic");
+            }
+            
+            // Publish initial connection status
+            PublishValue(QuestNavConstants.Topics.CONNECTION_STATUS, (int)currentStatus);
         }
         
         /// <summary>
@@ -235,7 +368,12 @@ namespace QuestNav.Network
         /// </summary>
         public void HandleStandbyEnter()
         {
-            Debug.Log("[QuestNetworkManager] Preparing for standby mode");
+            QueuedLogger.Log("[NetworkTableManager] Preparing for standby mode");
+            
+            // Reset heartbeat tracking
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+            
             if (nt != null && nt.Client != null && nt.Client.Connected())
             {
                 QueuedLogger.Log("[NetworkTableManager] Disconnecting from NetworkTables while entering standby mode");
@@ -245,21 +383,183 @@ namespace QuestNav.Network
             {
                 QueuedLogger.Log("[NetworkTableManager] Already disconnected from NetworkTables while entering standby mode");
             }
+            
+            // Update connection status
+            UpdateConnectionStatus(ConnectionStatus.Disconnected);
         }
         
         /// <summary>
-        /// Called when the app is going into standby mode
+        /// Called when the app is resuming from standby mode
         /// </summary>
         public void HandleStandbyExit()
         {
-            Debug.Log("[QuestNetworkManager] Preparing for standby mode");
+            QueuedLogger.Log("[NetworkTableManager] Resuming from standby mode");
+            
+            // Reset heartbeat tracking to force immediate check
+            lastHeartbeatRequestId = 0;
+            lastReceivedResponseId = 0;
+            heartbeatTimer = QuestNavConstants.HEARTBEAT_REQUEST_INTERVAL; // Force immediate heartbeat
+            
             if (nt == null || nt.Client == null || !nt.Client.Connected())
             {
                 QueuedLogger.Log("[NetworkTableManager] Attempting to reconnect to NetworkTables after standby mode");
                 ConnectToRobot();
-            } else 
+            } 
+            else 
             {
-                QueuedLogger.LogError("[NetworkTableManager] Already connected to NetworkTables after standby mode! This should not be possible! ");
+                QueuedLogger.LogWarning("[NetworkTableManager] Already connected to NetworkTables after standby mode! This should not be possible!");
+                // Flag connection as potentially stale
+                UpdateConnectionStatus(ConnectionStatus.Degraded);
+                
+                // Test the connection is truly alive
+                if (!nt.Client.ValidateConnection())
+                {
+                    QueuedLogger.Log("[NetworkTableManager] WebSocket connection validation failed after standby, reconnecting");
+                    Disconnect();
+                    ConnectToRobot();
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Updates the connection status and publishes it to NetworkTables
+        /// </summary>
+        /// <param name="newStatus">New connection status</param>
+        private void UpdateConnectionStatus(ConnectionStatus newStatus)
+        {
+            if (newStatus != currentStatus)
+            {
+                QueuedLogger.Log($"[NetworkTableManager] Connection status changed: {currentStatus} → {newStatus}");
+                currentStatus = newStatus;
+                
+                // Publish status if we have a connection
+                if (IsConnected())
+                {
+                    PublishValue(QuestNavConstants.Topics.CONNECTION_STATUS, (int)currentStatus);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Manually sends a heartbeat request - useful for debugging
+        /// </summary>
+        public void SendHeartbeat()
+        {
+            if (!IsConnected() || !QuestNavConstants.REQUIRE_HEARTBEAT) return;
+            
+            lastHeartbeatRequestId++;
+            PublishValue(QuestNavConstants.Topics.HEARTBEAT_REQUEST, lastHeartbeatRequestId);
+            QueuedLogger.Log($"[NetworkTableManager] Manually sent heartbeat request ID: {lastHeartbeatRequestId}");
+        }
+        
+        /// <summary>
+        /// Updates the heartbeat system - can be called directly for more control
+        /// </summary>
+        public void UpdateHeartbeat()
+        {
+            if (!IsConnected() || !QuestNavConstants.REQUIRE_HEARTBEAT) return;
+            
+            // Update heartbeat timer
+            heartbeatTimer += Time.deltaTime;
+            
+            // Time to send a heartbeat request?
+            if (heartbeatTimer >= QuestNavConstants.HEARTBEAT_REQUEST_INTERVAL)
+            {
+                // Generate and send new heartbeat request with unique ID
+                lastHeartbeatRequestId++;
+                PublishValue(QuestNavConstants.Topics.HEARTBEAT_REQUEST, lastHeartbeatRequestId);
+                heartbeatTimer = 0f;
+                
+                QueuedLogger.Log($"[NetworkTableManager] Sent heartbeat request ID: {lastHeartbeatRequestId}");
+                
+                // Check for responses to previous heartbeats
+                double responseId = GetValue<double>(QuestNavConstants.Topics.HEARTBEAT_RESPONSE);
+                
+                // If we got a new response that matches what we sent previously
+                if (responseId > lastReceivedResponseId && responseId <= lastHeartbeatRequestId)
+                {
+                    // Got a valid response
+                    lastReceivedResponseId = responseId;
+                    QueuedLogger.Log($"[NetworkTableManager] Received heartbeat response ID: {responseId}");
+                    
+                    // If we were in a degraded state but now getting responses, restore connected status
+                    if (currentStatus != ConnectionStatus.Connected)
+                    {
+                        QueuedLogger.Log("[NetworkTableManager] Heartbeat responses resumed. Connection restored.");
+                        UpdateConnectionStatus(ConnectionStatus.Connected);
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Coroutine for monitoring heartbeat
+        /// </summary>
+        private IEnumerator HeartbeatMonitoringCoroutine()
+        {
+            QueuedLogger.Log("[NetworkTableManager] Heartbeat monitoring coroutine started");
+            
+            while (true)
+            {
+                // Skip heartbeat if not required or if disconnected
+                if (!QuestNavConstants.REQUIRE_HEARTBEAT || !IsConnected())
+                {
+                    yield return new WaitForSeconds(0.5f);
+                    continue;
+                }
+                
+                // Update heartbeat timer
+                heartbeatTimer += Time.deltaTime;
+                
+                // Time to send a heartbeat request?
+                if (heartbeatTimer >= QuestNavConstants.HEARTBEAT_REQUEST_INTERVAL)
+                {
+                    // Generate and send new heartbeat request with unique ID
+                    lastHeartbeatRequestId++;
+                    PublishValue(QuestNavConstants.Topics.HEARTBEAT_REQUEST, lastHeartbeatRequestId);
+                    heartbeatTimer = 0f;
+                    
+                    QueuedLogger.Log($"[NetworkTableManager] Sent heartbeat request ID: {lastHeartbeatRequestId}");
+                    
+                    // Check for responses to previous heartbeats
+                    double responseId = GetValue<double>(QuestNavConstants.Topics.HEARTBEAT_RESPONSE);
+                    
+                    // If we got a new response that matches what we sent previously
+                    if (responseId > lastReceivedResponseId && responseId <= lastHeartbeatRequestId)
+                    {
+                        // Got a valid response
+                        lastReceivedResponseId = responseId;
+                        QueuedLogger.Log($"[NetworkTableManager] Received heartbeat response ID: {responseId}");
+                        
+                        // If we were in a degraded state but now getting responses, restore connected status
+                        if (currentStatus != ConnectionStatus.Connected)
+                        {
+                            QueuedLogger.Log("[NetworkTableManager] Heartbeat responses resumed. Connection restored.");
+                            UpdateConnectionStatus(ConnectionStatus.Connected);
+                        }
+                    }
+                    
+                    // If we haven't received any responses yet, but we haven't been trying for long
+                    // consider the connection in a connecting state
+                    if (lastReceivedResponseId == 0 && lastHeartbeatRequestId < QuestNavConstants.HEARTBEAT_DEGRADED_THRESHOLD)
+                    {
+                        UpdateConnectionStatus(ConnectionStatus.Connecting);
+                    }
+                    // If we've sent several heartbeats but received no responses, consider the connection degraded
+                    else if (lastReceivedResponseId == 0 && lastHeartbeatRequestId >= 5 && lastHeartbeatRequestId < 15)
+                    {
+                        UpdateConnectionStatus(ConnectionStatus.Degraded);
+                    }
+                    // If we've sent many heartbeats but received no responses, consider the connection lost
+                    else if (lastReceivedResponseId == 0 && lastHeartbeatRequestId >= 15)
+                    {
+                        QueuedLogger.Log("[NetworkTableManager] Heartbeat responses missing for too long. Forcing reconnection...");
+                        Disconnect();
+                        ConnectToRobot();
+                    }
+                }
+                
+                yield return null; // Wait until next frame
             }
         }
         
@@ -281,6 +581,13 @@ namespace QuestNav.Network
             {
                 yield return null;
             }
+            
+            // If the heartbeat coroutine isn't running and heartbeat is required, start it
+            if (IsConnected() && _heartbeatCoroutine == null && QuestNavConstants.REQUIRE_HEARTBEAT)
+            {
+                QueuedLogger.Log("[NetworkTableManager] Starting heartbeat coroutine after successful connection");
+                _heartbeatCoroutine = StartCoroutine(HeartbeatMonitoringCoroutine());
+            }
         }
         
         /// <summary>
@@ -289,6 +596,9 @@ namespace QuestNav.Network
         private async Task AttemptConnectionAsync()
         {
             bool connectionEstablished = false;
+            
+            // Set initial connection status to disconnected
+            UpdateConnectionStatus(ConnectionStatus.Disconnected);
             
             // If simulation mode is enabled, only try the simulation IP
             List<string> candidateAddresses = new List<string>();
@@ -321,6 +631,9 @@ namespace QuestNav.Network
                 
                 StringBuilder cycleLog = new StringBuilder();
                 cycleLog.AppendLine("[NetworkTableManager] Connection attempt cycle:");
+                
+                // Update connection status to connecting
+                UpdateConnectionStatus(ConnectionStatus.Connecting);
                 
                 foreach (string candidate in candidateAddresses)
                 {
@@ -403,6 +716,15 @@ namespace QuestNav.Network
                             nt = sink;
                             cycleLog.AppendLine($"Connected successfully to {resolvedAddress}.");
                             connectionEstablished = true;
+                            
+                            // Reset heartbeat tracking
+                            lastHeartbeatRequestId = 0;
+                            lastReceivedResponseId = 0;
+                            heartbeatTimer = 0f;
+                            
+                            // Update connection status
+                            UpdateConnectionStatus(ConnectionStatus.Connected);
+                            
                             break;
                         }
                         else

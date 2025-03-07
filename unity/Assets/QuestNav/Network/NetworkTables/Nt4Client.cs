@@ -35,10 +35,15 @@ namespace NetworkTables
         private readonly string _appName;
         private readonly string _serverAddress;
         
-        
         private WebSocket _ws;
         private long? _serverTimeOffsetUs;
         private long _networkLatencyUs;
+
+        // Track connection state
+        private bool _connectionActive = false;
+        private int _messageCounter = 0;
+        private int _pingCounter = 0;
+        private const int MAX_PING_WITHOUT_RESPONSE = 3;
 
         private readonly Dictionary<int, Nt4Subscription> _subscriptions = new Dictionary<int, Nt4Subscription>();
         private readonly Dictionary<string, Nt4Topic> _publishedTopics = new Dictionary<string, Nt4Topic>();
@@ -61,6 +66,9 @@ namespace NetworkTables
             _appName = appName;
             _onNewTopicData = onNewTopicData;
             _onOpen = onOpen;
+            _connectionActive = false;
+            _messageCounter = 0;
+            _pingCounter = 0;
         }
 
         /// <summary>
@@ -70,22 +78,52 @@ namespace NetworkTables
         {
             try
             {
-                if (_ws != null && (_ws.ReadyState == WebSocketState.Open || _ws.ReadyState == WebSocketState.Connecting))
+                // Clean up any existing connection first
+                if (_ws != null)
                 {
-                    return (true, null); // Already connected or connecting
+                    try
+                    {
+                        // Disconnect and clean up previous connection
+                        if (_ws.ReadyState == WebSocketState.Open || _ws.ReadyState == WebSocketState.Connecting)
+                        {
+                            _ws.Close();
+                        }
+                        
+                        // Ensure event handlers are removed to prevent memory leaks
+                        _ws.OnOpen -= OnOpen;
+                        _ws.OnMessage -= OnMessage;
+                        _ws.OnError -= OnError;
+                        _ws.OnClose -= OnClose;
+                        
+                        _ws = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[NT4] Error cleaning up existing WebSocket: {ex.Message}");
+                    }
                 }
 
+                // Reset connection state
+                _connectionActive = false;
+                _messageCounter = 0;
+                _pingCounter = 0;
+                _serverTopics.Clear();
+                _publishedTopics.Clear();
+
+                // Create a new connection
                 _ws = new WebSocket(_serverAddress);
                 _ws.OnOpen += OnOpen;
                 _ws.OnMessage += OnMessage;
                 _ws.OnError += OnError;
                 _ws.OnClose += OnClose;
 
+                Debug.Log($"[NT4] Attempting to connect to {_serverAddress}");
                 _ws.Connect();
                 return (true, null);
             }
             catch (Exception ex)
             {
+                Debug.LogError($"[NT4] Connection error: {ex.Message}");
                 return (false, ex.Message);
             }
         }
@@ -95,9 +133,72 @@ namespace NetworkTables
         /// </summary>
         public void Disconnect()
         {
-            if (Connected())
+            if (_ws != null)
             {
-                _ws.Close();
+                try
+                {
+                    if (_ws.ReadyState == WebSocketState.Open || _ws.ReadyState == WebSocketState.Connecting)
+                    {
+                        _ws.Close();
+                    }
+                    
+                    // Ensure event handlers are removed
+                    _ws.OnOpen -= OnOpen;
+                    _ws.OnMessage -= OnMessage;
+                    _ws.OnError -= OnError;
+                    _ws.OnClose -= OnClose;
+                    
+                    _ws = null;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[NT4] Error during disconnect: {ex.Message}");
+                }
+            }
+            
+            // Clear topics and subscriptions
+            _publishedTopics.Clear();
+            _subscriptions.Clear();
+            _serverTopics.Clear();
+            
+            _connectionActive = false;
+            _messageCounter = 0;
+            _pingCounter = 0;
+        }
+        
+        /// <summary>
+        /// Validate if the connection is still active by sending a timestamp ping
+        /// </summary>
+        /// <returns>True if the connection appears valid</returns>
+        public bool ValidateConnection()
+        {
+            // Basic connection check
+            if (_ws == null || _ws.ReadyState != WebSocketState.Open)
+            {
+                return false;
+            }
+            
+            // Send a timestamp to verify connection
+            try
+            {
+                WsSendTimestamp();
+                _pingCounter++;
+                
+                // If we've sent several pings without receiving any messages, connection is stale
+                if (_pingCounter > MAX_PING_WITHOUT_RESPONSE)
+                {
+                    Debug.LogWarning("[NT4] Connection appears stale - no responses to pings");
+                    _connectionActive = false;
+                    return false;
+                }
+                
+                return _connectionActive;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[NT4] Connection validation failed: {ex.Message}");
+                _connectionActive = false;
+                return false;
             }
         }
         
@@ -105,56 +206,82 @@ namespace NetworkTables
         private void OnOpen(object sender, EventArgs e)
         {
             Debug.Log("[NT4] Connected with identity " + _appName);
+            _connectionActive = true;
+            _messageCounter = 0;
+            _pingCounter = 0;
             WsSendTimestamp();
             
-            
+            // Call the user-provided event handler
+            _onOpen?.Invoke(this, e);
         }
 
         private void OnMessage(object message, MessageEventArgs args)
         {
+            // Update connection status whenever we receive a message
+            _connectionActive = true;
+            _messageCounter++;
+            _pingCounter = 0; // Reset ping counter as we got a message
+
             if (args.Data != null)
             {
-                // Attempt to decode the message as JSON array
-                object[] msg = JsonConvert.DeserializeObject<object[]>(args.Data);
-                if (msg == null)
+                try
                 {
-                    Debug.LogError("[NT4] Failed to decode JSON message: " + message);
-                    return;
-                }
-                // Iterate through the messages
-                foreach (object obj in msg)
-                {
-                    String objStr = obj.ToString();
-                    // Attempt to decode the message as a JSON object
-                    Dictionary<string, object> msgObj = JsonConvert.DeserializeObject<Dictionary<string, object>>(objStr);
-                    if (msgObj == null)
+                    // Attempt to decode the message as JSON array
+                    object[] msg = JsonConvert.DeserializeObject<object[]>(args.Data);
+                    if (msg == null)
                     {
-                        Debug.LogError("[NT4] Failed to decode JSON message: " + obj);
-                        continue;
+                        Debug.LogError("[NT4] Failed to decode JSON message: " + args.Data);
+                        return;
                     }
-                    // Handle the message
-                    HandleJsonMessage(msgObj);
+                    // Iterate through the messages
+                    foreach (object obj in msg)
+                    {
+                        String objStr = obj.ToString();
+                        // Attempt to decode the message as a JSON object
+                        Dictionary<string, object> msgObj = JsonConvert.DeserializeObject<Dictionary<string, object>>(objStr);
+                        if (msgObj == null)
+                        {
+                            Debug.LogError("[NT4] Failed to decode JSON message: " + obj);
+                            continue;
+                        }
+                        // Handle the message
+                        HandleJsonMessage(msgObj);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[NT4] Error processing JSON message: {ex.Message}");
                 }
             }
             else
             {
-                object[] msg = MessagePackSerializer.Deserialize<object[]>(args.RawData);
-                if (msg == null)
+                try
                 {
-                    Debug.LogError("[NT4] Failed to decode MSGPack message: " + message);
+                    object[] msg = MessagePackSerializer.Deserialize<object[]>(args.RawData);
+                    if (msg == null)
+                    {
+                        Debug.LogError("[NT4] Failed to decode MSGPack message");
+                        return;
+                    }
+                    HandleMsgPackMessage(msg);
                 }
-                HandleMsgPackMessage(msg);
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[NT4] Error processing binary message: {ex.Message}");
+                }
             }
         }
         
         private void OnError(object sender, ErrorEventArgs e)
         {
             Debug.LogError("[NT4] Error: " + e.Message + " " + e.Exception);
+            _connectionActive = false;
         }
         
         private void OnClose(object sender, CloseEventArgs e)
         {
             Debug.Log("[NT4] Disconnected: " + e.Reason);
+            _connectionActive = false;
         }
         
         /// <summary>
@@ -164,10 +291,17 @@ namespace NetworkTables
         /// <param name="type">The type of topic</param>
         public void PublishTopic(string key, string type)
         {
-            Nt4Topic topic = new Nt4Topic(GetNewUid(), key, type, new Dictionary<string, object>());
-            if (!Connected() || _publishedTopics.ContainsKey(key)) return;
-            _publishedTopics.Add(key, topic);
-            WsPublishTopic(topic);
+            try
+            {
+                Nt4Topic topic = new Nt4Topic(GetNewUid(), key, type, new Dictionary<string, object>());
+                if (!Connected() || _publishedTopics.ContainsKey(key)) return;
+                _publishedTopics.Add(key, topic);
+                WsPublishTopic(topic);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error publishing topic {key}: {ex.Message}");
+            }
         }
         
         /// <summary>
@@ -178,10 +312,17 @@ namespace NetworkTables
         /// <param name="properties">Properties of the topic</param>
         public void PublishTopic(string key, string type, Dictionary<string, object> properties)
         {
-            Nt4Topic topic = new Nt4Topic(GetNewUid(), key, type, properties);
-            if (!Connected() || _publishedTopics.ContainsKey(key)) return;
-            _publishedTopics.Add(key, topic);
-            WsPublishTopic(topic);
+            try
+            {
+                Nt4Topic topic = new Nt4Topic(GetNewUid(), key, type, properties);
+                if (!Connected() || _publishedTopics.ContainsKey(key)) return;
+                _publishedTopics.Add(key, topic);
+                WsPublishTopic(topic);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error publishing topic {key} with properties: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -190,15 +331,22 @@ namespace NetworkTables
         /// <param name="key">The topic to unpublish</param>
         public void UnpublishTopic(string key)
         {
-            if (!Connected()) return;
-            if (!_publishedTopics.ContainsKey(key))
+            try
             {
-                Debug.LogWarning("[NT4] Attempted to unpublish topic that was not published: " + key);
-                return;
+                if (!Connected()) return;
+                if (!_publishedTopics.ContainsKey(key))
+                {
+                    Debug.LogWarning("[NT4] Attempted to unpublish topic that was not published: " + key);
+                    return;
+                }
+                Nt4Topic topic = _publishedTopics[key];
+                _publishedTopics.Remove(key);
+                WsUnpublishTopic(topic);
             }
-            Nt4Topic topic = _publishedTopics[key];
-            _publishedTopics.Remove(key);
-            WsUnpublishTopic(topic);
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error unpublishing topic {key}: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -208,15 +356,22 @@ namespace NetworkTables
         /// <param name="value">The new value to publish</param>
         public void PublishValue(string key, object value)
         {
-            long timestamp = GetServerTimeUs() ?? 0;
-            if (!Connected()) return;
-            if (!_publishedTopics.ContainsKey(key))
+            try
             {
-                Debug.LogWarning("[NT4] Attempted to publish value for topic that was not published: " + key);
-                return;
+                long timestamp = GetServerTimeUs() ?? 0;
+                if (!Connected()) return;
+                if (!_publishedTopics.ContainsKey(key))
+                {
+                    Debug.LogWarning("[NT4] Attempted to publish value for topic that was not published: " + key);
+                    return;
+                }
+                Nt4Topic topic = _publishedTopics[key];
+                WsSendBinary(MessagePackSerializer.Serialize(new[] { topic.Uid, timestamp, TypeStrIdxLookup[topic.Type], value }));
             }
-            Nt4Topic topic = _publishedTopics[key];
-            WsSendBinary(MessagePackSerializer.Serialize(new[] { topic.Uid, timestamp, TypeStrIdxLookup[topic.Type], value }));
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error publishing value for topic {key}: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -230,12 +385,20 @@ namespace NetworkTables
         /// <returns>The ID of the subscription (for unsubscribing), -1 if not connected</returns>
         public int Subscribe(string key, double periodic = 0.1, bool all = false, bool topicsOnly = false, bool prefix = false)
         {
-            if(!Connected()) return -1;
-            Nt4SubscriptionOptions opts = new Nt4SubscriptionOptions(periodic, all, topicsOnly, prefix);
-            Nt4Subscription sub = new Nt4Subscription(GetNewUid(), new[]{key}, opts);
-            WsSubscribe(sub);
-            _subscriptions.Add(sub.Uid, sub);
-            return sub.Uid;
+            try
+            {
+                if(!Connected()) return -1;
+                Nt4SubscriptionOptions opts = new Nt4SubscriptionOptions(periodic, all, topicsOnly, prefix);
+                Nt4Subscription sub = new Nt4Subscription(GetNewUid(), new[]{key}, opts);
+                WsSubscribe(sub);
+                _subscriptions.Add(sub.Uid, sub);
+                return sub.Uid;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error subscribing to topic {key}: {ex.Message}");
+                return -1;
+            }
         }
         
         /// <summary>
@@ -246,11 +409,19 @@ namespace NetworkTables
         /// <returns>The ID of the subscription (for unsubscribing), -1 if not connected</returns>
         public int Subscribe(string key, Nt4SubscriptionOptions opts)
         {
-            if(!Connected()) return -1;
-            Nt4Subscription sub = new Nt4Subscription(GetNewUid(), new[]{key}, opts);
-            WsSubscribe(sub);
-            _subscriptions.Add(sub.Uid, sub);
-            return sub.Uid;
+            try
+            {
+                if(!Connected()) return -1;
+                Nt4Subscription sub = new Nt4Subscription(GetNewUid(), new[]{key}, opts);
+                WsSubscribe(sub);
+                _subscriptions.Add(sub.Uid, sub);
+                return sub.Uid;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error subscribing to topic {key} with options: {ex.Message}");
+                return -1;
+            }
         }
         
         /// <summary>
@@ -264,12 +435,20 @@ namespace NetworkTables
         /// <returns>The ID of the subscription (for unsubscribing)</returns>
         public int Subscribe(string[] keys, double periodic = 0.1, bool all = false, bool topicsOnly = false, bool prefix = false)
         {
-            if(!Connected()) return -1;
-            Nt4SubscriptionOptions opts = new Nt4SubscriptionOptions(periodic, all, topicsOnly, prefix);
-            Nt4Subscription sub = new Nt4Subscription(GetNewUid(), keys, opts);
-            WsSubscribe(sub);
-            _subscriptions.Add(sub.Uid, sub);
-            return sub.Uid;
+            try
+            {
+                if(!Connected()) return -1;
+                Nt4SubscriptionOptions opts = new Nt4SubscriptionOptions(periodic, all, topicsOnly, prefix);
+                Nt4Subscription sub = new Nt4Subscription(GetNewUid(), keys, opts);
+                WsSubscribe(sub);
+                _subscriptions.Add(sub.Uid, sub);
+                return sub.Uid;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error subscribing to multiple topics: {ex.Message}");
+                return -1;
+            }
         }
 
         /// <summary>
@@ -278,38 +457,59 @@ namespace NetworkTables
         /// <param name="uid">The ID of the subscription</param>
         public void Unsubscribe(int uid)
         {
-            if(!Connected()) return;
-            if (!_subscriptions.ContainsKey(uid))
+            try
             {
-                Debug.LogWarning("[NT4] Attempted to unsubscribe from a subscription that does not exist: " + uid);
-                return;
+                if(!Connected()) return;
+                if (!_subscriptions.ContainsKey(uid))
+                {
+                    Debug.LogWarning("[NT4] Attempted to unsubscribe from a subscription that does not exist: " + uid);
+                    return;
+                }
+                Nt4Subscription sub = _subscriptions[uid];
+                _subscriptions.Remove(uid);
+                WsUnsubscribe(sub);
             }
-            Nt4Subscription sub = _subscriptions[uid];
-            _subscriptions.Remove(uid);
-            WsUnsubscribe(sub);
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error unsubscribing from {uid}: {ex.Message}");
+            }
         }
         
         // ws utility functions
         private void WsSendJson(string method, Dictionary<string, object> paramsObj)
         {
-            if (!Connected()) return;
-            Dictionary<string, object> msg = new Dictionary<string, object>
+            try
             {
-                { "method", method },
-                { "params", paramsObj }
-            };
-            // convert msg to a json array, not object, containing only msg
-            _ws.SendAsync(JsonConvert.SerializeObject(new object[] {msg}), null);
+                if (!Connected()) return;
+                Dictionary<string, object> msg = new Dictionary<string, object>
+                {
+                    { "method", method },
+                    { "params", paramsObj }
+                };
+                // convert msg to a json array, not object, containing only msg
+                _ws.SendAsync(JsonConvert.SerializeObject(new object[] {msg}), null);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error sending JSON: {ex.Message}");
+            }
         }
         
-void WsSendBinary(byte[] data)
+        void WsSendBinary(byte[] data)
         {
-            if (!Connected())
+            try
             {
-                Debug.LogWarning("WebSocket is not open. Cannot send data.");
-                return;
+                if (!Connected())
+                {
+                    Debug.LogWarning("WebSocket is not open. Cannot send data.");
+                    return;
+                }
+                _ws.SendAsync(data, null);
             }
-            _ws.SendAsync(data, null);
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error sending binary data: {ex.Message}");
+            }
         }
 
         private void WsPublishTopic(Nt4Topic topic)
@@ -371,44 +571,58 @@ void WsSendBinary(byte[] data)
         }
         private void HandleJsonMessage(Dictionary<string, object> msg)
         {
-            if(!msg.ContainsKey("method") || !msg.ContainsKey("params")) return;
-            string method = msg["method"] as string;
-            if (method == null) return;
-            JObject parameters = msg["params"] as JObject;
-            if (parameters == null) return;
-            Dictionary<string, object> parametersDict = parameters.ToObject<Dictionary<string, object>>();
-            if (method == "announce")
+            try
             {
-                Nt4Topic topic = new Nt4Topic(parametersDict);
-                _serverTopics.Add(topic.Name, topic);
+                if(!msg.ContainsKey("method") || !msg.ContainsKey("params")) return;
+                string method = msg["method"] as string;
+                if (method == null) return;
+                JObject parameters = msg["params"] as JObject;
+                if (parameters == null) return;
+                Dictionary<string, object> parametersDict = parameters.ToObject<Dictionary<string, object>>();
+                if (method == "announce")
+                {
+                    Nt4Topic topic = new Nt4Topic(parametersDict);
+                    _serverTopics[topic.Name] = topic; // Use indexer to handle duplicates
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NT4] Error handling JSON message: {ex.Message}");
             }
         }
 
         private void HandleMsgPackMessage(object[] msg)
         {
-            int topicId = Convert.ToInt32(msg[0]);
-            long timestampUs = Convert.ToInt64(msg[1]);
-            object value = msg[3];
-            
-            if (topicId >= 0)
+            try
             {
-                Nt4Topic topic = null;
-                // Check to see if the topic ID matches any of the server topics
-                foreach (Nt4Topic serverTopic in _serverTopics.Values)
+                int topicId = Convert.ToInt32(msg[0]);
+                long timestampUs = Convert.ToInt64(msg[1]);
+                object value = msg[3];
+                
+                if (topicId >= 0)
                 {
-                    if (serverTopic.Uid == topicId)
+                    Nt4Topic topic = null;
+                    // Check to see if the topic ID matches any of the server topics
+                    foreach (Nt4Topic serverTopic in _serverTopics.Values)
                     {
-                        topic = serverTopic;
-                        break;
+                        if (serverTopic.Uid == topicId)
+                        {
+                            topic = serverTopic;
+                            break;
+                        }
                     }
+                    // If the topic is not found, return
+                    if (topic == null) return;
+                    _onNewTopicData?.Invoke(topic, timestampUs, value);
+                } else if (topicId == -1)
+                {
+                    // Handle receive timestamp
+                    WsHandleReceiveTimestamp(timestampUs, Convert.ToInt64(value));
                 }
-                // If the topic is not found, return
-                if (topic == null) return;
-                _onNewTopicData?.Invoke(topic, timestampUs, value);
-            } else if (topicId == -1)
+            }
+            catch (Exception ex)
             {
-                // Handle receive timestamp
-                WsHandleReceiveTimestamp(timestampUs, Convert.ToInt64(value));
+                Debug.LogError($"[NT4] Error handling MSGPack message: {ex.Message}");
             }
         }
 
@@ -418,9 +632,13 @@ void WsSendBinary(byte[] data)
             return new Random().Next(0, 10000000);
         }
 
+        /// <summary>
+        /// Checks if the client is connected
+        /// </summary>
+        /// <returns>True if connected, False otherwise</returns>
         public bool Connected()
         {
-            return _ws != null && _ws.ReadyState == WebSocketState.Open;
+            return _ws != null && _ws.ReadyState == WebSocketState.Open && _connectionActive;
         }
     }
 }

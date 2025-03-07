@@ -42,6 +42,21 @@ namespace QuestNav.Core
         public const int SIMULATION_PORT = 5810; // Use same as SERVER_PORT by default
         #endregion
         
+        /// <summary>
+        /// Whether to require heartbeat monitoring for connection health checks
+        /// </summary>
+        public const bool REQUIRE_HEARTBEAT = true;
+
+        /// <summary>
+        /// Time interval between heartbeat requests in seconds
+        /// </summary>
+        public const float HEARTBEAT_REQUEST_INTERVAL = 0.5f;
+
+        /// <summary>
+        /// Threshold for number of heartbeats before considering connection degraded
+        /// </summary>
+        public const int HEARTBEAT_DEGRADED_THRESHOLD = 5;
+        
         #region NetworkTables Topic Paths
         public static class Topics
         {
@@ -63,6 +78,21 @@ namespace QuestNav.Core
             // Initialization Topics
             public const string INIT_POSITION = BASE_PATH + "/init/position";
             public const string INIT_EULER_ANGLES = BASE_PATH + "/init/eulerAngles";
+            
+            /// <summary>
+            /// Topic for heartbeat request (sent by Quest)
+            /// </summary>
+            public const string HEARTBEAT_REQUEST = "QuestNav/Heartbeat/Request";
+    
+            /// <summary>
+            /// Topic for heartbeat response (sent by Robot)
+            /// </summary>
+            public const string HEARTBEAT_RESPONSE = "QuestNav/Heartbeat/Response";
+    
+            /// <summary>
+            /// Topic for connection status
+            /// </summary>
+            public const string CONNECTION_STATUS = "QuestNav/Connection/Status";
         }
         #endregion
         
