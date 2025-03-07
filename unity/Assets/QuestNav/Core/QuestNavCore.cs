@@ -59,6 +59,7 @@ namespace QuestNav.Core
         {
             // Set display frequency for Quest
             OVRPlugin.systemDisplayFrequency = displayFrequency;
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
             
             // Log simulation mode status
             if (QuestNavConstants.USE_SIMULATION_MODE)
@@ -71,6 +72,35 @@ namespace QuestNav.Core
             InitializeSubsystems();
             
             QueuedLogger.Log("[QuestNavCore] System initialized");
+        }
+        
+        /// <summary>
+        /// Handles app pause and resume events, including standby
+        /// </summary>
+        /// <param name="pauseStatus">True if pausing, false if resuming</param>
+        void OnApplicationPause(bool pauseStatus)
+        {
+            if (pauseStatus)
+            {
+                // App is pausing (going to standby)
+                Debug.Log("[QuestNavCore] Application paused, preparing for standby");
+                if (networkTableManager != null)
+                {
+                    networkTableManager.HandleStandbyEnter();
+                }
+            }
+            else
+            {
+                // App is resuming from pause (waking from standby)
+                Debug.Log("[QuestNavCore] Application resumed from standby");
+                // Ensure screen won't sleep
+                Screen.sleepTimeout = SleepTimeout.NeverSleep;
+                
+                if (networkTableManager != null)
+                {
+                    networkTableManager.HandleStandbyExit();
+                }
+            }
         }
 
         /// <summary>

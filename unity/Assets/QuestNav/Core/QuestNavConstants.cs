@@ -29,7 +29,7 @@ namespace QuestNav.Core
         /// <summary>
         /// Flag to enable simulation mode
         /// </summary>
-        public const bool USE_SIMULATION_MODE = false;
+        public const bool USE_SIMULATION_MODE = true;
         
         /// <summary>
         /// IP address to use when in simulation mode

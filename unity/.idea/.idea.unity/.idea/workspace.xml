@@ -5,50 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="6c48f596-4ef3-48f1-987c-2035047e180a" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/LICENSE" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/LICENSE.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Client.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Client.cs.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Source.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Source.cs.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Subscription.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Subscription.cs.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4SubscriptionOptions.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4SubscriptionOptions.cs.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Topic.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/Nt4Topic.cs.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/README.md.meta" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/TopicValue.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTables/TopicValue.cs.meta" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/.idea.unity/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.unity/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/.signature.p7s" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/LICENSE" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/LICENSE.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/NetworkTablesSharp.nuspec" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/NetworkTablesSharp.nuspec.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/README.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/README.md.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/lib.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/lib/netstandard2.1.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/lib/netstandard2.1/NetworkTablesSharp.dll" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/NetworkTablesSharp.1.0.2/lib/netstandard2.1/NetworkTablesSharp.dll.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/.signature.p7s" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/WebSocketSharp-netstandard.nuspec" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/WebSocketSharp-netstandard.nuspec.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/lib.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/lib/netstandard2.0.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/lib/netstandard2.0/websocket-sharp.dll" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/lib/netstandard2.0/websocket-sharp.dll.meta" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/lib/netstandard2.0/websocket-sharp.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/Packages/WebSocketSharp-netstandard.1.0.1/lib/netstandard2.0/websocket-sharp.xml.meta" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Assets/NuGet.config.meta" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/NuGet.config.meta" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavConstants.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavConstants.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavCore.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/QuestNav/Core/QuestNavCore.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTableManager.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/QuestNav/Network/NetworkTableManager.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Assets/Settings/UniversalRenderPipelineGlobalSettings.asset" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/Settings/UniversalRenderPipelineGlobalSettings.asset" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Assets/packages.config" beforeDir="false" afterPath="$PROJECT_DIR$/Assets/packages.config" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

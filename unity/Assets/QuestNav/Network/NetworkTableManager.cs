@@ -231,6 +231,39 @@ namespace QuestNav.Network
         }
         
         /// <summary>
+        /// Called when the app is going into standby mode
+        /// </summary>
+        public void HandleStandbyEnter()
+        {
+            Debug.Log("[QuestNetworkManager] Preparing for standby mode");
+            if (nt != null && nt.Client != null && nt.Client.Connected())
+            {
+                QueuedLogger.Log("[NetworkTableManager] Disconnecting from NetworkTables while entering standby mode");
+                nt.Client.Disconnect();
+            }
+            else
+            {
+                QueuedLogger.Log("[NetworkTableManager] Already disconnected from NetworkTables while entering standby mode");
+            }
+        }
+        
+        /// <summary>
+        /// Called when the app is going into standby mode
+        /// </summary>
+        public void HandleStandbyExit()
+        {
+            Debug.Log("[QuestNetworkManager] Preparing for standby mode");
+            if (nt == null || nt.Client == null || !nt.Client.Connected())
+            {
+                QueuedLogger.Log("[NetworkTableManager] Attempting to reconnect to NetworkTables after standby mode");
+                ConnectToRobot();
+            } else 
+            {
+                QueuedLogger.LogError("[NetworkTableManager] Already connected to NetworkTables after standby mode! This should not be possible! ");
+            }
+        }
+        
+        /// <summary>
         /// Begins the connection process
         /// </summary>
         private void ConnectToRobot()
@@ -268,12 +301,11 @@ namespace QuestNav.Network
             {
                 candidateAddresses.AddRange(new List<string>()
                 {
-                    "10.0.0.113"
-                    // GenerateIP(),
-                    // "172.22.11.2",
-                    // $"roboRIO-{teamNumber}-FRC.local",
-                    // $"roboRIO-{teamNumber}-FRC.lan",
-                    // $"roboRIO-{teamNumber}-FRC.frc-field.local"
+                    GenerateIP(),
+                    "172.22.11.2",
+                    $"roboRIO-{teamNumber}-FRC.local",
+                    $"roboRIO-{teamNumber}-FRC.lan",
+                    $"roboRIO-{teamNumber}-FRC.frc-field.local"
                 });
             }
             
