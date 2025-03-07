@@ -6,8 +6,8 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using System.Linq;
+using NetworkTables;
 using UnityEngine;
-using NetworkTablesSharp;
 using QuestNav.Core;
 using QuestNav.Telemetry;
 
@@ -97,9 +97,9 @@ namespace QuestNav.Network
         {
             if (nt != null)
             {
-                if (nt.Connected())
+                if (nt.Client.Connected())
                 {
-                    nt.Disconnect();
+                    nt.Client.Disconnect();
                 }
                 nt = null;
             }
@@ -119,7 +119,7 @@ namespace QuestNav.Network
         /// <returns>True if connected, false otherwise</returns>
         public bool IsConnected()
         {
-            return nt != null && nt.Connected();
+            return nt != null && nt.Client.Connected();
         }
         
         /// <summary>
@@ -164,14 +164,44 @@ namespace QuestNav.Network
         }
         
         /// <summary>
-        /// Gets a value from NetworkTables
+        /// Gets a value from NetworkTables with generic type support
         /// </summary>
         public T GetValue<T>(string topic)
         {
-            if (IsConnected())
+            if (!IsConnected()) return default(T);
+            
+            // Handle different types based on T
+            if (typeof(T) == typeof(long)) 
             {
-                return nt.GetValue<T>(topic);
+                return (T)(object)nt.GetLong(topic);
             }
+            if (typeof(T) == typeof(double))
+            {
+                return (T)(object)nt.GetDouble(topic);
+            }
+            if (typeof(T) == typeof(double[]))
+            {
+                return (T)(object)nt.GetDoubleArray(topic);
+            }
+            if (typeof(T) == typeof(string))
+            {
+                return (T)(object)nt.GetString(topic);
+            }
+            if (typeof(T) == typeof(float[]))
+            {
+                // Convert double[] to float[]
+                double[] doubleArray = nt.GetDoubleArray(topic);
+                if (doubleArray == null) return default(T);
+                
+                float[] floatArray = new float[doubleArray.Length];
+                for (int i = 0; i < doubleArray.Length; i++)
+                {
+                    floatArray[i] = (float)doubleArray[i];
+                }
+                return (T)(object)floatArray;
+            }
+            
+            QueuedLogger.LogWarning($"[NetworkTableManager] Unsupported type {typeof(T).Name} requested for topic {topic}");
             return default(T);
         }
         
@@ -238,11 +268,12 @@ namespace QuestNav.Network
             {
                 candidateAddresses.AddRange(new List<string>()
                 {
-                    GenerateIP(),
-                    "172.22.11.2",
-                    $"roboRIO-{teamNumber}-FRC.local",
-                    $"roboRIO-{teamNumber}-FRC.lan",
-                    $"roboRIO-{teamNumber}-FRC.frc-field.local"
+                    "10.0.0.113"
+                    // GenerateIP(),
+                    // "172.22.11.2",
+                    // $"roboRIO-{teamNumber}-FRC.local",
+                    // $"roboRIO-{teamNumber}-FRC.lan",
+                    // $"roboRIO-{teamNumber}-FRC.frc-field.local"
                 });
             }
             
@@ -321,7 +352,7 @@ namespace QuestNav.Network
                             try
                             {
                                 QueuedLogger.Log($"[NetworkTableManager] Creating NT4Source with app={QuestNavConstants.APP_NAME}, server={resolvedAddress}, port={port}");
-                                return new Nt4Source(resolvedAddress, QuestNavConstants.APP_NAME, true, port);
+                                return new Nt4Source(QuestNavConstants.APP_NAME, resolvedAddress, port);
                             }
                             catch (Exception innerEx)
                             {
@@ -334,7 +365,7 @@ namespace QuestNav.Network
                             }
                         });
                         
-                        if (sink != null && sink.Connected())
+                        if (sink != null && sink.Client != null && sink.Client.Connected())
                         {
                             ipAddress = resolvedAddress; // Cache the working address
                             nt = sink;
