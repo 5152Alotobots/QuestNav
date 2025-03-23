@@ -1921,6 +1921,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 7412840042211121785, guid: 016a95885e06b4c479740b5fa70863f4, type: 3}
+      propertyPath: m_Enabled
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 7847449403238870662, guid: 016a95885e06b4c479740b5fa70863f4, type: 3}
       propertyPath: m_Name
       value: QuestNavPassthroughManager
@@ -2079,7 +2083,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 96c444e444ef492390ac951ad21693e8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  webCamTextureManager: {fileID: 1375737373}
+  passthroughCameraManager: {fileID: 1375737373}
   port: 5809
   jpegQuality: 75
   frameRate: 30

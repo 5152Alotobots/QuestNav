@@ -1,19 +1,23 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using System;
 using System.Collections;
 using System.Linq;
+using QuestNav.Utils;
 using UnityEngine;
 using UnityEngine.Assertions;
-using PCD = QuestNav.Passthrough.PassthroughCameraDebugger;
+using UnityEngine.Serialization;
 
 namespace QuestNav.Passthrough
 {
-    public class WebCamTextureManager : MonoBehaviour
+    public class PassthroughCameraManager : MonoBehaviour
     {
         [SerializeField] public PassthroughCameraEye Eye = PassthroughCameraEye.Left;
+        [FormerlySerializedAs("RequestedResolution")]
         [SerializeField, Tooltip("The requested resolution of the camera may not be supported by the chosen camera. In such cases, the closest available values will be used.\n\n" +
                                  "When set to (0,0), the highest supported resolution will be used.")]
-        public Vector2Int RequestedResolution;
+        
+        public Vector2Int requestedResolution;
         [SerializeField] public PassthroughCameraPermissions CameraPermissions;
 
         /// <summary>
@@ -21,13 +25,12 @@ namespace QuestNav.Passthrough
         /// </summary>
         public WebCamTexture WebCamTexture { get; private set; }
 
-        private bool m_hasPermission;
+        private bool hasPermission;
 
         private void Awake()
         {
-            PCD.DebugMessage(LogType.Log, $"{nameof(WebCamTextureManager)}.{nameof(Awake)}() was called");
-            Assert.AreEqual(1, FindObjectsByType<WebCamTextureManager>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length,
-                $"PCA: Passthrough Camera: more than one {nameof(WebCamTextureManager)} component. Only one instance is allowed at a time. Current instance: {name}");
+            Assert.AreEqual(1, FindObjectsByType<PassthroughCameraManager>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length,
+                $"[Passthrough Camera Manager] More than one {nameof(PassthroughCameraManager)} component. Only one instance is allowed at a time.");
 #if UNITY_ANDROID
             CameraPermissions.AskCameraPermissions();
 #endif
@@ -35,52 +38,37 @@ namespace QuestNav.Passthrough
 
         private void OnEnable()
         {
-            PCD.DebugMessage(LogType.Log, $"PCA: {nameof(OnEnable)}() was called");
-            if (!PassthroughCameraUtils.IsSupported)
+            if (!PassthroughCameraUtils.IsSupported) throw new PlatformNotSupportedException("Passthrough camera is not supported.");
+            
+            if (!PassthroughCameraPermissions.HasCameraPermission == true)
             {
-                PCD.DebugMessage(LogType.Log, "PCA: Passthrough Camera functionality is not supported by the current device." +
-                          $" Disabling {nameof(WebCamTextureManager)} object");
-                enabled = false;
+                QueuedLogger.LogError(
+                    $"[Passthrough Camera Manager] Passthrough Camera requires permission(s) {string.Join(" and ", PassthroughCameraPermissions.CameraPermissions)}. Waiting for them to be granted...");
                 return;
             }
 
-            m_hasPermission = PassthroughCameraPermissions.HasCameraPermission == true;
-            if (!m_hasPermission)
-            {
-                PCD.DebugMessage(LogType.Error,
-                    $"PCA: Passthrough Camera requires permission(s) {string.Join(" and ", PassthroughCameraPermissions.CameraPermissions)}. Waiting for them to be granted...");
-                return;
-            }
-
-            PCD.DebugMessage(LogType.Log, "PCA: All permissions have been granted");
-            _ = StartCoroutine(InitializeWebCamTexture());
+            QueuedLogger.Log("[Passthrough Camera Manager] All Permissions granted. Starting...");
+            _ = StartCoroutine(WebCamTextureCoroutine());
         }
 
         private void OnDisable()
         {
-            PCD.DebugMessage(LogType.Log, $"PCA: {nameof(OnDisable)}() was called");
-            StopCoroutine(InitializeWebCamTexture());
-            if (WebCamTexture != null)
-            {
-                WebCamTexture.Stop();
-                Destroy(WebCamTexture);
-                WebCamTexture = null;
-            }
+            StopCoroutine(WebCamTextureCoroutine());
+            if (!WebCamTexture) return;
+            WebCamTexture.Stop();
+            Destroy(WebCamTexture);
+            WebCamTexture = null;
         }
 
         private void Update()
         {
-            if (!m_hasPermission)
-            {
-                if (PassthroughCameraPermissions.HasCameraPermission != true)
-                    return;
-
-                m_hasPermission = true;
-                _ = StartCoroutine(InitializeWebCamTexture());
-            }
+            if (hasPermission) return;
+            if (PassthroughCameraPermissions.HasCameraPermission != true) return;
+            hasPermission = true;
+            _ = StartCoroutine(WebCamTextureCoroutine());
         }
 
-        private IEnumerator InitializeWebCamTexture()
+        private IEnumerator WebCamTextureCoroutine()
         {
             while (true)
             {
@@ -91,14 +79,14 @@ namespace QuestNav.Passthrough
                     {
                         var deviceName = devices[cameraData.index].name;
                         WebCamTexture webCamTexture;
-                        if (RequestedResolution == Vector2Int.zero)
+                        if (requestedResolution == Vector2Int.zero)
                         {
                             var largestResolution = PassthroughCameraUtils.GetOutputSizes(Eye).OrderBy(static size => size.x * size.y).Last();
                             webCamTexture = new WebCamTexture(deviceName, largestResolution.x, largestResolution.y);
                         }
                         else
                         {
-                            webCamTexture = new WebCamTexture(deviceName, RequestedResolution.x, RequestedResolution.y);
+                            webCamTexture = new WebCamTexture(deviceName, requestedResolution.x, requestedResolution.y);
                         }
                         // There is a bug in the current implementation of WebCamTexture: if 'Play()' is called at the same frame the WebCamTexture was created, this error is logged and the WebCamTexture object doesn't work:
                         //     Camera2: SecurityException java.lang.SecurityException: validateClientPermissionsLocked:1325: Callers from device user 0 are not currently allowed to connect to camera "66"
@@ -107,17 +95,17 @@ namespace QuestNav.Passthrough
                         yield return null;
                         webCamTexture.Play();
                         var currentResolution = new Vector2Int(webCamTexture.width, webCamTexture.height);
-                        if (RequestedResolution != Vector2Int.zero && RequestedResolution != currentResolution)
+                        if (requestedResolution != Vector2Int.zero && requestedResolution != currentResolution)
                         {
-                            PCD.DebugMessage(LogType.Warning, $"WebCamTexture created, but '{nameof(RequestedResolution)}' {RequestedResolution} is not supported. Current resolution: {currentResolution}.");
+                            QueuedLogger.LogWarning($"[Passthrough Camera Manager] Requested resolution is not supported. Current resolution: {currentResolution}.");
                         }
                         WebCamTexture = webCamTexture;
-                        PCD.DebugMessage(LogType.Log, $"WebCamTexture created, texturePtr: {WebCamTexture.GetNativeTexturePtr()}, size: {WebCamTexture.width}/{WebCamTexture.height}");
+                        QueuedLogger.Log($"WebCamTexture created, texturePtr: {WebCamTexture.GetNativeTexturePtr()}, size: {WebCamTexture.width}/{WebCamTexture.height}");
                         yield break;
                     }
                 }
-
-                PCD.DebugMessage(LogType.Error, $"Requested camera is not present in WebCamTexture.devices: {string.Join(", ", devices)}.");
+                
+                QueuedLogger.LogError($"Requested camera is not present in WebCamTexture.devices: {string.Join(", ", devices)}.");
                 yield return null;
             }
         }

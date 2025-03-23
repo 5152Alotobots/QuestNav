@@ -16,16 +16,16 @@ namespace QuestNav.Passthrough
         // The only pixel format supported atm
         private const int YUV_420_888 = 0x00000023;
 
-        private static AndroidJavaObject s_currentActivity;
-        private static AndroidJavaObject s_cameraManager;
-        private static bool? s_isSupported;
-        private static int? s_horizonOsVersion;
+        private static AndroidJavaObject currentActivity;
+        private static AndroidJavaObject cameraManager;
+        private static bool? isSupported;
+        private static int? horizonOsVersion;
 
         // Caches
         internal static readonly Dictionary<PassthroughCameraEye, (string id, int index)> CameraEyeToCameraIdMap = new();
-        private static readonly ConcurrentDictionary<PassthroughCameraEye, List<Vector2Int>> s_cameraOutputSizes = new();
-        private static readonly ConcurrentDictionary<string, AndroidJavaObject> s_cameraCharacteristicsMap = new();
-        private static readonly OVRPose?[] s_cachedCameraPosesRelativeToHead = new OVRPose?[2];
+        private static readonly ConcurrentDictionary<PassthroughCameraEye, List<Vector2Int>> cameraOutputSizes = new();
+        private static readonly ConcurrentDictionary<string, AndroidJavaObject> cameraCharacteristicsMap = new();
+        private static readonly OVRPose?[] cachedCameraPosesRelativeToHead = new OVRPose?[2];
 
         /// <summary>
         /// Get the Horizon OS version number on the headset
@@ -34,21 +34,21 @@ namespace QuestNav.Passthrough
         {
             get
             {
-                if (!s_horizonOsVersion.HasValue)
+                if (!horizonOsVersion.HasValue)
                 {
                     var vrosClass = new AndroidJavaClass("vros.os.VrosBuild");
-                    s_horizonOsVersion = vrosClass.CallStatic<int>("getSdkVersion");
+                    horizonOsVersion = vrosClass.CallStatic<int>("getSdkVersion");
 #if OVR_INTERNAL_CODE
                     // 10000 means that the build doesn't have a proper release version, and it is still in Mainline,
                     // not in a release branch.
 #endif // OVR_INTERNAL_CODE
-                    if (s_horizonOsVersion == 10000)
+                    if (horizonOsVersion == 10000)
                     {
-                        s_horizonOsVersion = -1;
+                        horizonOsVersion = -1;
                     }
                 }
 
-                return s_horizonOsVersion.Value != -1 ? s_horizonOsVersion.Value : null;
+                return horizonOsVersion.Value != -1 ? horizonOsVersion.Value : null;
             }
         }
 
@@ -59,7 +59,7 @@ namespace QuestNav.Passthrough
         {
             get
             {
-                if (!s_isSupported.HasValue)
+                if (!isSupported.HasValue)
                 {
                     var headset = OVRPlugin.GetSystemHeadsetType();
                     return (headset == OVRPlugin.SystemHeadset.Meta_Quest_3 ||
@@ -67,7 +67,7 @@ namespace QuestNav.Passthrough
                            (!HorizonOSVersion.HasValue || HorizonOSVersion >= MINSUPPORTOSVERSION);
                 }
 
-                return s_isSupported.Value;
+                return isSupported.Value;
             }
         }
 
@@ -78,7 +78,7 @@ namespace QuestNav.Passthrough
         /// <param name="cameraEye">The passthrough camera</param>
         public static List<Vector2Int> GetOutputSizes(PassthroughCameraEye cameraEye)
         {
-            return s_cameraOutputSizes.GetOrAdd(cameraEye, GetOutputSizesInternal(cameraEye));
+            return cameraOutputSizes.GetOrAdd(cameraEye, GetOutputSizesInternal(cameraEye));
         }
 
         /// <summary>
@@ -129,27 +129,27 @@ namespace QuestNav.Passthrough
         {
             var index = cameraEye == PassthroughCameraEye.Left ? 0 : 1;
 
-            if (s_cachedCameraPosesRelativeToHead[index] == null)
+            if (cachedCameraPosesRelativeToHead[index] == null)
             {
                 var cameraId = GetCameraIdByEye(cameraEye);
-                var cameraCharacteristics = s_cameraManager.Call<AndroidJavaObject>("getCameraCharacteristics", cameraId);
+                var cameraCharacteristics = cameraManager.Call<AndroidJavaObject>("getCameraCharacteristics", cameraId);
 
                 var cameraTranslation = GetCameraValueByKey<float[]>(cameraCharacteristics, "LENS_POSE_TRANSLATION");
-                var p_headFromCamera = new Vector3(cameraTranslation[0], cameraTranslation[1], -cameraTranslation[2]);
+                var pHeadFromCamera = new Vector3(cameraTranslation[0], cameraTranslation[1], -cameraTranslation[2]);
 
                 var cameraRotation = GetCameraValueByKey<float[]>(cameraCharacteristics, "LENS_POSE_ROTATION");
-                var q_cameraFromHead = new Quaternion(-cameraRotation[0], -cameraRotation[1], cameraRotation[2], cameraRotation[3]);
+                var qCameraFromHead = new Quaternion(-cameraRotation[0], -cameraRotation[1], cameraRotation[2], cameraRotation[3]);
 
-                var q_headFromCamera = Quaternion.Inverse(q_cameraFromHead);
+                var qHeadFromCamera = Quaternion.Inverse(qCameraFromHead);
 
-                s_cachedCameraPosesRelativeToHead[index] = new OVRPose
+                cachedCameraPosesRelativeToHead[index] = new OVRPose
                 {
-                    position = p_headFromCamera,
-                    orientation = q_headFromCamera
+                    position = pHeadFromCamera,
+                    orientation = qHeadFromCamera
                 };
             }
 
-            var headFromCamera = s_cachedCameraPosesRelativeToHead[index].Value;
+            var headFromCamera = cachedCameraPosesRelativeToHead[index].Value;
             var worldFromHead = OVRPlugin.GetNodePoseStateImmediate(OVRPlugin.Node.Head).Pose.ToOVRPose();
             var worldFromCamera = worldFromHead * headFromCamera;
             worldFromCamera.orientation *= Quaternion.Euler(180, 0, 0);
@@ -207,9 +207,9 @@ namespace QuestNav.Passthrough
 
             Debug.Log($"PCA: PassthroughCamera - Initializing...");
             using var activityClass = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-            s_currentActivity = activityClass.GetStatic<AndroidJavaObject>("currentActivity");
-            s_cameraManager = s_currentActivity.Call<AndroidJavaObject>("getSystemService", "camera");
-            Assert.IsNotNull(s_cameraManager, "Camera manager has not been provided by the Android system");
+            currentActivity = activityClass.GetStatic<AndroidJavaObject>("currentActivity");
+            cameraManager = currentActivity.Call<AndroidJavaObject>("getSystemService", "camera");
+            Assert.IsNotNull(cameraManager, "Camera manager has not been provided by the Android system");
 
             var cameraIds = GetCameraIdList();
             Debug.Log($"PCA: PassthroughCamera - cameraId list is {string.Join(", ", cameraIds)}");
@@ -272,7 +272,7 @@ namespace QuestNav.Passthrough
 
         private static string[] GetCameraIdList()
         {
-            return s_cameraManager.Call<string[]>("getCameraIdList");
+            return cameraManager.Call<string[]>("getCameraIdList");
         }
 
         private static List<Vector2Int> GetOutputSizesInternal(PassthroughCameraEye cameraEye)
@@ -303,8 +303,8 @@ namespace QuestNav.Passthrough
 
         private static AndroidJavaObject GetCameraCharacteristics(string cameraId)
         {
-            return s_cameraCharacteristicsMap.GetOrAdd(cameraId,
-                _ => s_cameraManager.Call<AndroidJavaObject>("getCameraCharacteristics", cameraId));
+            return cameraCharacteristicsMap.GetOrAdd(cameraId,
+                _ => cameraManager.Call<AndroidJavaObject>("getCameraCharacteristics", cameraId));
         }
 
         private static AndroidJavaObject GetCameraCharacteristics(PassthroughCameraEye eye)

@@ -2,12 +2,9 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using QuestNav.Utils;
 using UnityEngine;
 using UnityEngine.Android;
-#if UNITY_ANDROID
-using PCD = QuestNav.Passthrough.PassthroughCameraDebugger;
-
-#endif
 
 namespace QuestNav.Passthrough
 {
@@ -26,7 +23,7 @@ namespace QuestNav.Passthrough
         };
 
         public static bool? HasCameraPermission { get; private set; }
-        private static bool s_askedOnce;
+        private static bool askedOnce;
 
 #if UNITY_ANDROID
         /// <summary>
@@ -34,19 +31,19 @@ namespace QuestNav.Passthrough
         /// </summary>
         public void AskCameraPermissions()
         {
-            if (s_askedOnce)
+            if (askedOnce)
             {
                 return;
             }
-            s_askedOnce = true;
+            askedOnce = true;
             if (IsAllCameraPermissionsGranted())
             {
                 HasCameraPermission = true;
-                PCD.DebugMessage(LogType.Log, "PCA: All camera permissions granted.");
+                QueuedLogger.Log("[Passthrough Camera Permissions] All camera permissions granted.");
             }
             else
             {
-                PCD.DebugMessage(LogType.Log, "PCA: Requesting camera permissions.");
+                QueuedLogger.Log("[Passthrough Camera Permissions] Requesting camera permissions...");
 
                 var callbacks = new PermissionCallbacks();
                 callbacks.PermissionDenied += PermissionCallbacksPermissionDenied;
@@ -65,7 +62,7 @@ namespace QuestNav.Passthrough
         /// <param name="permissionName"></param>
         private static void PermissionCallbacksPermissionGranted(string permissionName)
         {
-            PCD.DebugMessage(LogType.Log, $"PCA: Permission {permissionName} Granted");
+            QueuedLogger.Log($"[Passthrough Camera Permissions] Permission {permissionName} Granted");
 
             // Only initialize the WebCamTexture object if both permissions are granted
             if (IsAllCameraPermissionsGranted())
@@ -80,9 +77,9 @@ namespace QuestNav.Passthrough
         /// <param name="permissionName"></param>
         private static void PermissionCallbacksPermissionDenied(string permissionName)
         {
-            PCD.DebugMessage(LogType.Warning, $"PCA: Permission {permissionName} Denied");
+            QueuedLogger.LogWarning($"[Passthrough Camera Permissions] Permission {permissionName} Denied");
             HasCameraPermission = false;
-            s_askedOnce = false;
+            askedOnce = false;
         }
 
         private static bool IsAllCameraPermissionsGranted() => CameraPermissions.All(Permission.HasUserAuthorizedPermission);

@@ -6,8 +6,9 @@ using System.Collections.Generic;
 using System.Net;
 using System.Text;
 using System.Threading;
+using QuestNav.Utils;
 using UnityEngine;
-using PCD = QuestNav.Passthrough.PassthroughCameraDebugger;
+using UnityEngine.Serialization;
 
 namespace QuestNav.Passthrough
 {
@@ -16,14 +17,13 @@ namespace QuestNav.Passthrough
     /// </summary>
     public class PassthroughMjpegServer : MonoBehaviour
     {
-        [SerializeField] private WebCamTextureManager webCamTextureManager;
+        [FormerlySerializedAs("webCamTextureManager")] [SerializeField] private PassthroughCameraManager passthroughCameraManager;
         [SerializeField] private int port = 8080;
         [SerializeField] private int jpegQuality = 75;
         [SerializeField] private int frameRate = 30;
         [SerializeField] private bool startServerOnAwake = true;
         
         private HttpListener httpListener;
-        private bool isRunning;
         private Thread serverThread;
         private readonly List<HttpListenerContext> clients = new List<HttpListenerContext>();
         private readonly object clientsLock = new object();
@@ -45,22 +45,6 @@ namespace QuestNav.Passthrough
             frameInterval = 1000 / frameRate;
         }
         
-        void OnEnable()
-        {
-            if (webCamTextureManager == null)
-            {
-                webCamTextureManager = GetComponent<WebCamTextureManager>();
-                if (webCamTextureManager == null)
-                {
-                    webCamTextureManager = FindObjectOfType<WebCamTextureManager>();
-                    if (webCamTextureManager == null)
-                    {
-                        PCD.DebugMessage(LogType.Error, "No WebCamTextureManager found. MJPEG server will not function.");
-                    }
-                }
-            }
-        }
-        
         void OnDestroy()
         {
             StopServer();
@@ -68,8 +52,7 @@ namespace QuestNav.Passthrough
         
         void Update()
         {
-            if (!isRunning || webCamTextureManager == null || webCamTextureManager.WebCamTexture == null)
-                return;
+            if (!IsRunning || !passthroughCameraManager || !passthroughCameraManager.WebCamTexture) return;
             
             // Only capture frames at the specified frame rate
             if ((DateTime.Now - lastFrameTime).TotalMilliseconds < frameInterval)
@@ -83,15 +66,15 @@ namespace QuestNav.Passthrough
         
         private void CaptureFrame()
         {
-            var webCamTexture = webCamTextureManager.WebCamTexture;
-            if (webCamTexture == null || !webCamTexture.isPlaying || webCamTexture.width <= 16)
+            var webCamTexture = passthroughCameraManager.WebCamTexture;
+            if (!webCamTexture || !webCamTexture.isPlaying || webCamTexture.width <= 16)
                 return;
             
             // Create texture for rendering if needed
-            if (renderTexture == null || renderTexture.width != webCamTexture.width || 
+            if (!renderTexture || renderTexture.width != webCamTexture.width || 
                 renderTexture.height != webCamTexture.height)
             {
-                if (renderTexture != null)
+                if (renderTexture)
                     Destroy(renderTexture);
                 
                 renderTexture = new Texture2D(webCamTexture.width, webCamTexture.height, TextureFormat.RGB24, false);
@@ -102,7 +85,7 @@ namespace QuestNav.Passthrough
             renderTexture.Apply();
             
             // Convert to JPEG
-            byte[] jpegBytes = renderTexture.EncodeToJPG(jpegQuality);
+            var jpegBytes = renderTexture.EncodeToJPG(jpegQuality);
             
             // Update current frame data
             lock (frameDataLock)
@@ -114,9 +97,9 @@ namespace QuestNav.Passthrough
         /// <summary>
         /// Starts the MJPEG HTTP server
         /// </summary>
-        public void StartServer()
+        private void StartServer()
         {
-            if (isRunning) return;
+            if (IsRunning) return;
             
             try
             {
@@ -124,12 +107,14 @@ namespace QuestNav.Passthrough
                 httpListener.Prefixes.Add($"http://*:{port}/");
                 httpListener.Start();
                 
-                isRunning = true;
-                PCD.DebugMessage(LogType.Log, $"MJPEG Server started on port {port}");
+                IsRunning = true;
+                QueuedLogger.Log($"[Passthrough MJPEG Server] MJPEG Server started on port {port}");
                 
                 // Start server thread
-                serverThread = new Thread(ServerThreadMethod);
-                serverThread.IsBackground = true;
+                serverThread = new Thread(ServerThreadMethod)
+                {
+                    IsBackground = true
+                };
                 serverThread.Start();
                 
                 // Start client connection listener
@@ -137,19 +122,19 @@ namespace QuestNav.Passthrough
             }
             catch (Exception ex)
             {
-                PCD.DebugMessage(LogType.Error, $"Failed to start MJPEG server: {ex.Message}");
-                isRunning = false;
+                QueuedLogger.LogError($"[Passthrough MJPEG Server] Failed to start MJPEG server: {ex.Message}");
+                IsRunning = false;
             }
         }
         
         /// <summary>
         /// Stops the MJPEG HTTP server
         /// </summary>
-        public void StopServer()
+        private void StopServer()
         {
-            if (!isRunning) return;
+            if (!IsRunning) return;
             
-            isRunning = false;
+            IsRunning = false;
             
             // Close all client connections
             lock (clientsLock)
@@ -162,7 +147,7 @@ namespace QuestNav.Passthrough
                     }
                     catch (Exception ex)
                     {
-                        PCD.DebugMessage(LogType.Warning, $"Error closing MJPEG client connection: {ex.Message}");
+                        QueuedLogger.LogError($"[Passthrough MJPEG Server] Error closing MJPEG client connection: {ex.Message}");
                     }
                 }
                 clients.Clear();
@@ -176,20 +161,20 @@ namespace QuestNav.Passthrough
                 httpListener = null;
             }
             
-            PCD.DebugMessage(LogType.Log, "MJPEG Server stopped");
+            QueuedLogger.Log("[Passthrough MJPEG Server] MJPEG Server stopped");
         }
         
         /// <summary>
         /// Returns true if the server is currently running
         /// </summary>
-        public bool IsRunning => isRunning;
-        
+        private bool IsRunning { get; set; }
+
         /// <summary>
         /// Toggles the server between running and stopped states
         /// </summary>
         public void ToggleServer()
         {
-            if (isRunning)
+            if (IsRunning)
                 StopServer();
             else
                 StartServer();
@@ -197,9 +182,9 @@ namespace QuestNav.Passthrough
         
         private IEnumerator AcceptClientConnections()
         {
-            while (isRunning)
+            while (IsRunning)
             {
-                bool hadError = false;
+                var hadError = false;
                 IAsyncResult asyncResult = null;
                 
                 try
@@ -210,21 +195,21 @@ namespace QuestNav.Passthrough
                 catch (Exception ex)
                 {
                     hadError = true;
-                    if (isRunning)
+                    if (IsRunning)
                     {
-                        PCD.DebugMessage(LogType.Error, $"Error starting MJPEG BeginGetContext: {ex.Message}");
+                        QueuedLogger.LogError($"[Passthrough MJPEG Server] Error starting MJPEG BeginGetContext: {ex.Message}");
                     }
                 }
                 
-                if (!hadError && asyncResult != null)
+                if (!hadError)
                 {
                     // Wait for the connection without blocking the main thread
-                    while (!asyncResult.IsCompleted && isRunning)
+                    while (!asyncResult.IsCompleted && IsRunning)
                     {
                         yield return null;
                     }
                     
-                    if (isRunning)
+                    if (IsRunning)
                     {
                         try
                         {
@@ -236,9 +221,9 @@ namespace QuestNav.Passthrough
                         }
                         catch (Exception ex)
                         {
-                            if (isRunning)
+                            if (IsRunning)
                             {
-                                PCD.DebugMessage(LogType.Error, $"Error accepting MJPEG client connection: {ex.Message}");
+                                QueuedLogger.LogError($"[Passthrough MJPEG Server] Error accepting MJPEG client connection: {ex.Message}");
                             }
                             hadError = true;
                         }
@@ -267,7 +252,7 @@ namespace QuestNav.Passthrough
                         clients.Add(context);
                     }
                     
-                    PCD.DebugMessage(LogType.Log, $"New MJPEG client connected from {context.Request.RemoteEndPoint}, total clients: {clients.Count}");
+                    QueuedLogger.Log($"[Passthrough MJPEG Server] New MJPEG client connected from {context.Request.RemoteEndPoint}, total clients: {clients.Count}");
                 }
                 else
                 {
@@ -277,7 +262,7 @@ namespace QuestNav.Passthrough
             }
             catch (Exception ex)
             {
-                PCD.DebugMessage(LogType.Error, $"Error processing MJPEG connection: {ex.Message}");
+                QueuedLogger.LogError($"[Passthrough MJPEG Server] Error processing MJPEG connection: {ex.Message}");
                 try
                 {
                     context.Response.Close();
@@ -303,7 +288,7 @@ namespace QuestNav.Passthrough
             }
             catch (Exception ex)
             {
-                PCD.DebugMessage(LogType.Error, $"Error serving MJPEG HTML page: {ex.Message}");
+                QueuedLogger.LogError($"[Passthrough MJPEG Server] Error serving MJPEG HTML page: {ex.Message}");
             }
         }
         
@@ -319,7 +304,7 @@ namespace QuestNav.Passthrough
                 "Content-Length: {0}\r\n\r\n";
             
             // Client send loop
-            while (isRunning)
+            while (IsRunning)
             {
                 try
                 {
@@ -371,7 +356,7 @@ namespace QuestNav.Passthrough
                             }
                             catch (Exception)
                             {
-                                // Client disconnected, add to cleanup list
+                                // Client disconnected, add to clean up list
                                 disconnectedClients.Add(client);
                             }
                         }
@@ -392,7 +377,7 @@ namespace QuestNav.Passthrough
                         
                         if (disconnectedClients.Count > 0)
                         {
-                            PCD.DebugMessage(LogType.Log, $"MJPEG Clients disconnected: {disconnectedClients.Count}, remaining: {clients.Count}");
+                            QueuedLogger.Log($"[Passthrough MJPEG Server] MJPEG Clients disconnected: {disconnectedClients.Count}, remaining: {clients.Count}");
                         }
                     }
                     
@@ -401,9 +386,9 @@ namespace QuestNav.Passthrough
                 }
                 catch (Exception ex)
                 {
-                    if (isRunning)
+                    if (IsRunning)
                     {
-                        PCD.DebugMessage(LogType.Error, $"Error in MJPEG server thread: {ex.Message}");
+                        QueuedLogger.LogError($"[Passthrough MJPEG Server] Error in MJPEG server thread: {ex.Message}");
                     }
                     
                     // Don't spam errors
